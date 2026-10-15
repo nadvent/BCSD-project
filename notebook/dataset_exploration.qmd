@@ -1,0 +1,140 @@
+---
+title: "BCSD Dataset Exploration & Verification"
+author: "Vision ML Project"
+date: today
+format:
+  html:
+    toc: true
+    code-fold: show
+    code-line-numbers: true
+    theme: cosmo
+execute:
+  echo: true
+  warning: false
+---
+
+## Overview
+
+This notebook loads samples from the BCSD dataset using `VisionDataset` and visualizes:
+
+1. **Original Image** (unnormalized RGB)
+2. **Ground Truth Mask** (binary lesion target)
+3. **Overlaid Mask** (alpha-blended visualization to check spatial alignment)
+
+## Setup & Imports
+
+```{python}
+#| label: setup
+import sys
+from pathlib import Path
+import importlib
+import numpy as np
+import matplotlib.pyplot as plt
+
+# 1. Resolve project root reliably (whether cwd is /notebook or project root)
+cwd = Path.cwd()
+project_root = cwd if (cwd / "data").exists() else cwd.parent
+src_dir = str(project_root / "src" / "python_pl")
+
+# 2. Insert at index 0 so Python prioritizes your folder over any system packages
+if src_dir not in sys.path:
+    sys.path.insert(0, src_dir)
+
+# 3. Import and explicitly reload to flush the in-memory cache
+import dataset
+importlib.reload(dataset)
+import torch
+from torch.utils.data import Dataset, DataLoader
+from dataset import VisionDataset
+from PIL import Image
+import torchvision.transforms.v2 as transforms
+from torchvision.transforms.v2 import functional as F
+
+
+# 4. Sanity check: confirm the signature Python is seeing
+import inspect
+print("Loaded from:", dataset.__file__)
+print("Parameters:", inspect.signature(VisionDataset.__init__))
+```
+
+## Dataset Initialization
+
+```{python}
+data_dir = project_root / "data" / "train"
+
+train_dataset = VisionDataset(data_dir=str(data_dir), is_train=False)
+train_loader = DataLoader(train_dataset, batch_size=4, shuffle=True)
+
+print(f"Total training samples: {len(train_dataset)}")
+images, masks = next(iter(train_loader))
+print(f"Batch image tensor shape: {images.shape}")  # [B, 3, H, W]
+print(f"Batch mask tensor shape:  {masks.shape}")   # [B, 1, H, W]
+```
+
+## Helper Function: Un-normalizing Images
+
+```{python}
+# Inverse ImageNet normalization to return images to [0, 1] range for plotting
+IMAGENET_MEAN = np.array([0.485, 0.456, 0.406])
+IMAGENET_STD = np.array([0.229, 0.224, 0.225])
+
+def to_numpy_image(tensor):
+    """
+    Converts a normalized PyTorch tensor [3, H, W] to a displayable NumPy image [H, W, 3].
+    """
+    img = tensor.detach().cpu().numpy().transpose(1, 2, 0)
+    img = img * IMAGENET_STD + IMAGENET_MEAN
+    return np.clip(img, 0.0, 1.0)
+
+def to_numpy_mask(tensor):
+    """
+    Converts a mask PyTorch tensor [1, H, W] to a 2D NumPy array [H, W].
+    """
+    return tensor.detach().cpu().squeeze().numpy()
+```
+
+## Side-by-Side Visualization
+
+```{python}
+#| label: fig-dataset-samples
+#| fig-cap: "Side-by-side inspection: Original Image, Ground Truth Mask, and Overlay."
+#| fig-width: 12
+#| fig-height: 12
+
+num_samples = min(4, images.shape[0])
+fig, axes = plt.subplots(num_samples, 3, figsize=(12, 4 * num_samples))
+
+for i in range(num_samples):
+    img_np = to_numpy_image(images[i])
+    mask_np = to_numpy_mask(masks[i])
+    
+    # 1. Original Image
+    axes[i, 0].imshow(img_np)
+    axes[i, 0].set_title(f"Sample {i+1}: Image")
+    axes[i, 0].axis("off")
+    
+    # 2. Ground Truth Mask
+    axes[i, 1].imshow(mask_np, cmap="gray", vmin=0, vmax=1)
+    axes[i, 1].set_title(f"Sample {i+1}: Mask")
+    axes[i, 1].axis("off")
+    
+    # 3. Overlay (Mask highlighted in red over the image)
+    axes[i, 2].imshow(img_np)
+    # Mask overlay: show where mask == 1 with transparent red
+    overlay_mask = np.ma.masked_where(mask_np == 0, mask_np)
+    axes[i, 2].imshow(overlay_mask, cmap="autumn", alpha=0.5, vmin=0, vmax=1)
+    axes[i, 2].set_title(f"Sample {i+1}: Overlay")
+    axes[i, 2].axis("off")
+
+plt.tight_layout()
+plt.show()
+```
+
+## Sanity Checks
+
+```{python}
+# Verify unique values in the mask tensor (should only be 0.0 and 1.0)
+unique_vals = torch.unique(masks).tolist()
+print(f"Unique values present in masks: {unique_vals}")
+assert set(unique_vals).issubset({0.0, 1.0}), "Warning: Non-binary values detected in mask!"
+```
