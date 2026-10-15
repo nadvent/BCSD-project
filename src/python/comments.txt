@@ -1,0 +1,21 @@
+# two convolutional layers, followed by batchNorm (weights and bias) and ReLU.
+        # Sequential is similar to torch.nn.ModuleList but provides a container
+        # for running...you guess it, sequences.
+            # Repeat the same steps as the first Convolution
+            # Batch Normalization: Accelerating Deep Network Training by
+            # Reducing Internal Covariate Shift <https://arxiv.org/abs/1502.03167>
+        Up-Conv or Transpose-convolutions 2x2,
+        Upsample the image, decrease channels.
+        it's pretty accurate because the information from
+        the (feature maps in) encoder helps "skip connections" that provide spatial data
+        We doubleconv again to combine the information from the upsampled layer
+        It's also for refining data and avoiding artifacts caused by a 2x2 up-conv
+        '''k dimensions)
+# Building UNet from scratch
+# see https://arxiv.org/abs/1505.04597 for reference
+        # 1x1 Convolution for raw logits rather than probabilities (e.g. torch.sigmoid).
+        # More in BCEWithLogitsLoss in training.py
+    # This method is only relevant if we
+    # DON'T use padding for our convolution layer (see README.md)
+    # Forward propagation (output) and linking all the layers
+        

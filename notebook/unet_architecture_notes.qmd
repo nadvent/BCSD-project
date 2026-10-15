@@ -1,0 +1,171 @@
+---
+title: "U-Net Mathematical Foundations & Architecture Notes"
+author: "Vision ML Project"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    code-fold: show
+    theme: cosmo
+    math: mathjax
+---
+
+## High-Level Architecture Overview
+
+The U-Net architecture [@ronneberger2015unetconvolutionalnetworksbiomedical] is a fully convolutional neural network (FCN) organized into two symmetric halves:
+
+1. **The Contracting Path (Encoder)**: Extracts hierarchical feature representations and global semantic context while downsampling spatial dimensions.
+2. **The Expansive Path (Decoder)**: Upsamples resolution and projects deep semantic features back to pixel-level coordinates, fused with fine spatial details via **skip connections**.
+3. **The Bottleneck (Bridge)**: Operates at the lowest spatial resolution and highest channel capacity, connecting encoder to decoder.
+
+---
+
+## The Mathematics of the Contracting Path (Encoder)
+
+### Tensor Representations & Channels
+
+An input image is represented as a 3D tensor:
+
+$$\mathbf{X} \in \mathbb{R}^{C_{\text{in}} \times H \times W}$$
+
+where $C_{\text{in}} = 3$ for RGB, $C_{\text{in}} = 1$ for grayscale, and $H, W$ denote the spatial height and width ($416 \times 416$).
+
+A single 2D convolutional filter is parameterized as a 3D tensor matching the depth of the input:
+
+$$\mathbf{K}^{(k)} \in \mathbb{R}^{C_{\text{in}} \times f \times f} \quad (\text{typically } f = 3)$$
+
+To output $C_{\text{out}}$ feature channels (e.g., $64$), the layer evaluates $C_{\text{out}}$ independent filters in parallel. The complete weight parameter is a 4D tensor:
+
+$$\mathbf{W} \in \mathbb{R}^{C_{\text{out}} \times C_{\text{in}} \times f \times f}$$
+
+### The Convolution Operation as an Inner Product
+
+At each spatial position $(i, j)$, filter $\mathbf{K}^{(k)}$ computes the **Frobenius inner product** (equivalent to the Hilbert-Schmidt inner product for finite matrices) across all channels, adds a scalar bias $b^{(k)}$, and passes the scalar activation to the non-linear activation function (ReLU, $\sigma(z) = \max(0, z)$):
+
+$$Y_{k, i, j} = \sigma\!\left( b^{(k)} + \sum_{c=1}^{C_{\text{in}}} \sum_{u=0}^{f-1} \sum_{v=0}^{f-1} K^{(k)}_{c, u, v} \, X_{c, \, i+u, \, j+v} \right)$$
+
+#### Why Projecting to 64 Dimensions Adds Detail
+While raw RGB values only provide color intensity at $(i, j) \in \mathbb{R}^3$, the $C_{\text{out}} = 64$ channels project the local $3 \times 3$ patch into a richer feature space:
+- Filter $1$ detects cell boundary gradients ($45^\circ$).
+- Filter $2$ detects nuclear basophilic staining (purple hematoxylin).
+- Filter $3$ detects eosinophilic cytoplasmic texture (pink).
+
+The initial layer thus transforms raw pixels into 64 distinct morphological basis descriptors.
+
+### Spatial Dimension Formulas & Padding Trade-offs
+
+For input spatial size $n$, filter size $f$, padding $p$, and stride $s$, the discrete output size is:
+
+$$n_{\text{out}} = \left\lfloor \frac{n + 2p - f}{s} \right\rfloor + 1$$
+
+* **Valid / Unpadded Convolution ($p=0, s=1, f=3$)**:
+  $$n_{\text{out}} = n - 3 + 1 = n - 2$$
+* **Same / Padded Convolution ($p=1, s=1, f=3$)**:
+  $$n_{\text{out}} = \frac{n + 2(1) - 3}{1} + 1 = n$$
+* **Max Pooling ($p=0, s=2, f=2$)**:
+  $$n_{\text{out}} = \left\lfloor \frac{n - 2}{2} \right\rfloor + 1 = \left\lfloor \frac{n}{2} \right\rfloor$$
+
+#### Historical Context: Why the 2015 Paper Used Unpadded Convolutions
+Ronneberger et al. used unpadded convolutions ($p = 0$) because they applied the **overlap-tile strategy** to segment massive gigapixel microscopy images. Zero-padding creates dark boundary artifacts along the borders of each tile, so they unpadded convolutions and mirrored the outer boundary of the tile. 
+
+For fixed-size microscopic smears (e.g. $416 \times 416$), modern practice often prefers same-padding ($p = 1$) to keep mask sizes identical to inputs.
+
+---
+
+## Weight Initialization & Batch Normalization
+
+### Kaiming (He) Normal Initialization
+
+To prevent vanishing or exploding gradients through repeated convolutions and ReLUs, weights are initialized from a zero-mean Gaussian with variance scaled by the fan-in:
+
+$$W \sim \mathcal{N}\!\left(0, \, \sqrt{\frac{2}{C_{\text{in}} \cdot f^2}}\right)$$
+
+### Role of Batch Normalization
+
+Batch Normalization [@ioffe2015batchnormalizationacceleratingdeep] standardizes feature maps across mini-batches:
+
+$$\hat{x}^{(k)} = \frac{x^{(k)} - \mathbb{E}[x^{(k)}]}{\sqrt{\operatorname{Var}[x^{(k)}] + \epsilon}}, \quad y^{(k)} = \gamma^{(k)} \hat{x}^{(k)} + \beta^{(k)}$$
+
+* Accelerates convergence by stabilizing layer input distributions.
+* Makes the convolution layer's explicit scalar bias redundant (since $\beta^{(k)}$ learns the affine shift), which is why we set `bias=False` in `nn.Conv2d`.
+
+---
+
+## Bottleneck & Expansive Path (Decoder)
+
+### Block 5: The Bottleneck
+
+Block 5 sits at the lowest spatial resolution ($26 \times 26$ with padding=1, or $18 \times 18$ with padding=0) and highest semantic depth ($1024$ channels). It has **no pooling layer**, serving as the latent representation connecting the encoder and decoder.
+
+### Transposed Convolutions ($2 \times 2$ Up-Conv)
+
+To climb back up the U-shape, we use a transposed convolution (`nn.ConvTranspose2d`, stride $2$, kernel size $2$):
+- Doubles spatial dimensions ($H, W \to 2H, 2W$).
+- Halves channel capacity ($C \to C/2$).
+
+### Skip Connections ("Copy and Crop")
+
+Downsampling discards high-frequency spatial coordinate details. Skip connections bypass the bottleneck, forwarding feature maps directly from the encoder to the decoder:
+
+$$\mathbf{Z}_l = \left[ \operatorname{Crop}(\mathbf{E}_l) \;\|\; \mathbf{D}_l \right] \in \mathbb{R}^{C \times H_{\text{dec}} \times W_{\text{dec}}}$$
+
+where $\mathbf{E}_l$ is the encoder feature map, $\mathbf{D}_l$ is the upsampled decoder tensor, and $\|$ denotes channel concatenation (`dim=1`). 
+
+* In unpadded U-Net ($p=0$), $\mathbf{E}_l$ is larger than $\mathbf{D}_l$, requiring a **center-crop**:
+  $$\Delta y = \frac{H_{\text{enc}} - H_{\text{dec}}}{2}, \quad \Delta x = \frac{W_{\text{enc}} - W_{\text{dec}}}{2}$$
+* In padded U-Net ($p=1$), $H_{\text{enc}} = H_{\text{dec}}$, making cropping an identity operation.
+
+### Refining with Double Convolution
+
+After concatenation, the tensor passes through two $3 \times 3$ convolutions to:
+1. Smooth out potential checkerboard artifacts introduced by $2 \times 2$ transposed convolutions.
+2. Fuse high-level semantic context with local spatial boundary features.
+
+### Final $1 \times 1$ Projection
+
+A single $1 \times 1$ convolution projects the final 64-channel feature map down to $C_{\text{out}} = 1$ scalar logit per pixel without changing spatial dimensions:
+
+$$z_{i, j} \in (-\infty, \infty)$$
+
+We keep this as a raw logit rather than applying `torch.sigmoid` so that `nn.BCEWithLogitsLoss` can evaluate the loss using the numerically stable log-sum-exp formulation.
+
+---
+
+## Tensor Dimension Verification
+
+```{python}
+import torch
+import sys
+from pathlib import Path
+
+# Verify shapes directly using our model
+project_root = Path.cwd().parent
+sys.path.insert(0, str(project_root / "src" / "python_pl"))
+sys.path.insert(0, str(project_root / "src" / "python"))
+
+from model import UNet
+
+x = torch.randn(1, 3, 416, 416)
+
+# 1. Unpadded (p=0)
+model_unpadded = UNet(in_channels=3, out_channels=1, padding=0)
+out_unpadded = model_unpadded(x)
+print(f"Unpadded (p=0): Input {tuple(x.shape)} -> Output {tuple(out_unpadded.shape)}")
+
+# 2. Padded (p=1)
+model_padded = UNet(in_channels=3, out_channels=1, padding=1)
+out_padded = model_padded(x)
+print(f"Padded (p=1):   Input {tuple(x.shape)} -> Output {tuple(out_padded.shape)}")
+```
+
+---
+
+## References
+
+::: {#refs}
+* Ronneberger, O., Fischer, P., & Brox, T. (2015). *U-Net: Convolutional Networks for Biomedical Image Segmentation*. [arXiv:1505.04597](https://arxiv.org/abs/1505.04597).
+* Ioffe, S., & Szegedy, C. (2015). *Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift*. [arXiv:1502.03167](https://arxiv.org/abs/1502.03167).
+* He, K., Zhang, X., Ren, S., & Sun, J. (2015). *Delving Deep into Rectifiers: Surpassing Human-Level Performance on ImageNet Classification*. [arXiv:1502.01852](https://arxiv.org/abs/1502.01852).
+:::
