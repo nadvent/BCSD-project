@@ -1,7 +1,3 @@
-<<<<<<< HEAD
-# BCSD-project
-WIP Machine learning (vision) project with Blood Cell Segmenation dataset
-=======
 # Blood Cell Semantic Segmentation: PyTorch Training & C++ Inference Pipeline
 
 (WIP). An end-to-end computer vision pipeline combining **PyTorch** model training and **high-performance C++ inference** (via ONNX Runtime) for automated blood cell segmentation in microscopic smear images.
@@ -306,4 +302,4 @@ SOFTWARE.
 ```
 
 For full legal terms, see the project [LICENSE](https://www.google.com/search?q=LICENSE) file.
->>>>>>> 772b2be (Finished Dataset.py and Quarto for image comparison)
+=======
