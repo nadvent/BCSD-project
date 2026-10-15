@@ -29,6 +29,7 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+node_modules/**
 
 # ==========================================
 # PyTorch & Machine Learning Artifacts
@@ -132,3 +133,4 @@ desktop.ini
 !.vscode/tasks.json
 !.vscode/launch.json
 !.vscode/extensions.json
+node_modules/
