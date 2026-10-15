@@ -1,0 +1,134 @@
+# ==========================================
+# Byte-compiled / optimized / runtime files
+# ==========================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# ==========================================
+# Virtual Environments & Packages
+# ==========================================
+.venv/
+venv/
+env/
+ENV/
+src/python_pl/venv/
+src/python/venv/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# ==========================================
+# PyTorch & Machine Learning Artifacts
+# ==========================================
+# Exclude heavy model checkpoints and exports
+*.pt
+*.pth
+*.onnx
+*.engine
+*.bin
+
+# Exclude generated training outputs, but keep directory structure
+outputs/*
+!outputs/.gitkeep
+
+# TensorBoard logs & profiling
+runs/
+lightning_logs/
+wandb/
+
+# ==========================================
+# Dataset (Images & Masks)
+# ==========================================
+# Do not track large image datasets in git
+data/train/original/*
+data/train/mask/*
+data/test/original/*
+data/test/mask/*
+
+# Retain directory structure via .gitkeep
+!data/**/.gitkeep
+
+# Raw downloaded archives
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.rar
+*.7z
+
+# ==========================================
+# Quarto & Jupyter Notebooks
+# ==========================================
+.ipynb_checkpoints/
+.quarto/
+*_files/
+*.html
+
+# ==========================================
+# C++ / CMake Build Artifacts
+# ==========================================
+# Build directories
+build/
+bin/
+src/cpp_pl/build/
+src/cpp/build/
+cmake-build-*/
+out/
+
+# CMake output
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.cmake
+compile_commands.json
+.clangd/
+
+# Compiled objects, libraries, and executables
+*.o
+*.obj
+*.a
+*.lib
+*.dylib
+*.dll
+*.exe
+*.out
+*.app
+
+# ==========================================
+# Operating System Files
+# ==========================================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# ==========================================
+# IDE & Editor Settings
+# ==========================================
+.idea/
+*.swp
+*.swo
+*~
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json

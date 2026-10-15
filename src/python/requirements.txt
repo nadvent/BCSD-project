@@ -1,0 +1,19 @@
+# Target the PyTorch CUDA 12.1 index directly
+--find-links https://pytorch.org
+
+# Deep Learning Core
+torch==2.4.0
+torchvision==0.19.0
+
+# ONNX Ecosystem (For exporting and testing the model bridge)
+onnx==1.16.1
+onnxruntime==1.19.0
+
+# Data Manipulation & Computer Vision Utilities
+numpy==1.26.4
+opencv-python==4.10.0.84
+pillow==10.4.0
+matplotlib==3.9.2
+tqdm==4.66.5
+pandas
+
