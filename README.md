@@ -1,6 +1,4 @@
-<<<<<<< HEAD
 =======
-<<<<<<< HEAD
 # BCSD-project
 WIP Machine learning (vision) project with Blood Cell Segmenation dataset
 =======
@@ -280,7 +278,6 @@ quarto render notebook/dataset_exploration.qmd
 <!---->
 ---
 
-<<<<<<< HEAD
 =======
 >>>>>>> 772b2be (Finished Dataset.py and Quarto for image comparison)
 >>>>>>> feature/model-training
