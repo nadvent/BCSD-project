@@ -1,19 +1,44 @@
-# Target the PyTorch CUDA 12.1 index directly
---find-links https://pytorch.org
+# ==========================================
+# Core Deep Learning & Computer Vision
+# ==========================================
+# Note: torch and torchvision must be >=2.1 for torchvision.transforms.v2
+torch>=2.1.0
+torchvision>=0.16.0
 
-# Deep Learning Core
-torch==2.4.0
-torchvision==0.19.0
+# ==========================================
+# Image Processing & Scientific Computing
+# ==========================================
+numpy>=1.24.0,<2.0.0
+Pillow>=10.0.0
+opencv-python>=4.8.0
 
-# ONNX Ecosystem (For exporting and testing the model bridge)
-onnx==1.16.1
-onnxruntime==1.19.0
+# ==========================================
+# Plotting & Exploratory Data Analysis
+# ==========================================
+matplotlib>=3.7.0
 
-# Data Manipulation & Computer Vision Utilities
-numpy==1.26.4
-opencv-python==4.10.0.84
-pillow==10.4.0
-matplotlib==3.9.2
-tqdm==4.66.5
-pandas
+# ==========================================
+# Model Architectures & Segmentation
+# ==========================================
+# Optional: Pretrained backbones and standard U-Net architectures
+segmentation-models-pytorch>=0.3.3
+
+# ==========================================
+# Model Serialization & Deployment
+# ==========================================
+onnx>=1.15.0
+onnxruntime>=1.16.0
+
+# ==========================================
+# Utilities & Configuration
+# ==========================================
+pyyaml>=6.0.1
+tqdm>=4.66.0
+
+# ==========================================
+# Quarto & Interactive Notebook Support
+# ==========================================
+jupyter>=1.0.0
+ipykernel>=6.25.0
+
 

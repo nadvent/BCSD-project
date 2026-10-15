@@ -1,86 +1,104 @@
+from __future__ import annotations
+
 import os
-import torch
-from PIL import Image
-from torch.utils.data import Dataset, DataLoader
-import torchvision.transforms.v2 as transforms
-from torchvision.transforms.v2 import functional as F
 from pathlib import Path
+from typing import cast
+
+import torch
+import torchvision.transforms.v2 as transforms  # pyright: ignore[reportMissingTypeStubs]
+from PIL import Image
+from torch.utils.data import DataLoader, Dataset
+from torchvision.transforms.v2 import functional as F  # pyright: ignore[reportMissingTypeStubs]
+from typing_extensions import override
 
 
-# Load Dataset
+class VisionDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
 
-class VisionDataset(Dataset):
-    def __init__(self, data_dir, is_train=True):
+    data_dir: str
+    images_dir: str
+    masks_dir: str
+    is_train: bool
+    filenames: list[str]
+    normalize: transforms.Normalize
+
+    def __init__(self, data_dir: str, is_train: bool = True) -> None:
         self.data_dir = data_dir
         self.images_dir = os.path.join(data_dir, "original")
         self.masks_dir = os.path.join(data_dir, "mask")
         self.is_train = is_train
 
         if not os.path.exists(self.images_dir):
-            raise FileNotFoundError(f"Directory 'self.images_dir' not found")
+            raise FileNotFoundError(f"Directory '{self.images_dir}' not found")
 
         self.filenames = sorted(
-            [f for f in os.listdir(self.images_dir)
-            if f.lower().endswith(('.png', '.jpg'))]
+            [
+                f
+                for f in os.listdir(self.images_dir)
+                if f.lower().endswith((".png", ".jpg", ".jpeg"))
+            ]
         )
 
+        # ImageNet calculations
         self.normalize = transforms.Normalize(
-            # Using ImageNet calculated values for RGB 
             mean=[0.485, 0.456, 0.406],
-            std=[0.229, 0.224, 0.225]
+            std=[0.229, 0.224, 0.225],
         )
 
-
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.filenames)
 
-    # get the images into a readable format and apply transformations
-    def __getitem__(self, idx):
-        filename = self.filenames[idx]
-        img_path = os.path.join(self.images_dir,filename)
+    @override
+    def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
+        filename: str = self.filenames[idx]
+        img_path: str = os.path.join(self.images_dir, filename)
 
-        stem = Path(filename).stem
-
-        mask_path = os.path.join(self.masks_dir, f"{stem}.png")  # Assuming masks are in PNG format
-
+        stem: str = Path(filename).stem
+        mask_path: str = os.path.join(self.masks_dir, f"{stem}.png")
         if not os.path.exists(mask_path):
-            fallback_jpg = os.path.join(self.masks_dir, f"{stem}.jpg")
-            if os.path.exists(fallback_jpg):
-                mask_path = fallback_jpg
-            else:
-                raise FileNotFoundError(f"Mask file for '{filename}' not found in '{self.masks_dir}'")
+            mask_path = os.path.join(self.masks_dir, f"{stem}.jpg")
 
-        image = Image.open(img_path).convert("RGB")
-        mask = Image.open(mask_path).convert("L") # greyscale
+        image: Image.Image = Image.open(img_path).convert("RGB")
+        mask: Image.Image = Image.open(mask_path).convert("L")
 
-        # tensor
-        image = F.to_image(image)
-        mask = F.to_image(mask)
+        image_tensor = cast(torch.Tensor, F.to_image(image))  # pyright: ignore[reportUnknownMemberType]
+        mask_tensor = cast(torch.Tensor, F.to_image(mask))  # pyright: ignore[reportUnknownMemberType]
 
-        mask = F.resize(mask, (416, 416), interpolation=transforms.InterpolationMode.NEAREST)
-        image = F.resize(image, (416, 416), interpolation=transforms.InterpolationMode.BILINEAR)
+        mask_tensor = F.resize(
+            mask_tensor,
+            [416, 416],
+            interpolation=transforms.InterpolationMode.NEAREST,
+        )
+        image_tensor = F.resize(
+            image_tensor,
+            [416, 416],
+            interpolation=transforms.InterpolationMode.BILINEAR,
+        )
 
-        # we flip the image and mask horizontally because
-        # in medical training, the orientation of the image is actually valid for both sides.. 
-        # This is a data augmentation technique to increase the size of the dataset.
-        if self.is_train:
-            if torch.rand(1) < 0.5:
-                image = transforms.functional.hflip(image)
-                mask = transforms.functional.hflip(mask)
-        
-        # torch datatype and scale the pixels to float32 
-        image = F.to_dtype(image, torch.float32, scale=True) # [0,1]
-        image = self.normalize(image)
+        # In medical imaging, the orientation of the images are valid even if
+        # it's flipped horizontally. Hence, we can get augment our data better
+        if self.is_train and bool(torch.rand(1).item() < 0.5):
+            image_tensor = F.hflip(image_tensor)
+            mask_tensor = F.hflip(mask_tensor)
 
-        mask = F.to_dtype(mask, torch.float32, scale=False)
-        mask = (mask > 0).float() # in {0, 1}
+        # Scale RGB image to float32 [0.0, 1.0] and normalize
+        image_tensor = F.to_dtype(image_tensor, torch.float32, scale=True)
+        image_tensor = cast(torch.Tensor, self.normalize(image_tensor))
 
-        return image, mask 
+        # Convert mask to binary float32 {0, 1}
+        # 0 for black, 1 for white pixels in mask
+        mask_tensor = F.to_dtype(mask_tensor, torch.float32, scale=False)
+        mask_tensor = (mask_tensor > 0).float()
+
+        return image_tensor, mask_tensor
+
 
 if __name__ == "__main__":
     train_dataset = VisionDataset(data_dir="./data/train", is_train=True)
-    train_loader = DataLoader(train_dataset, batch_size=4, shuffle=True)
+    train_loader: DataLoader[tuple[torch.Tensor, torch.Tensor]] = DataLoader(
+        train_dataset, batch_size=4, shuffle=True
+    )
 
-    images, masks = next(iter(train_loader))
-    print(f"Batch image shape: {images.shape}")  # [4, 3, 416, 416]
-    print(f"Batch mask shape:  {masks.shape}")   # [4, 1, 416, 416]
+    batch: tuple[torch.Tensor, torch.Tensor] = next(iter(train_loader))  # pyright: ignore[reportAny]
+    images, masks = batch
+    print(f"Batch image shape: {images.shape}")
+    print(f"Batch mask shape:  {masks.shape}")
