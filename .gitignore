@@ -30,6 +30,7 @@ wheels/
 .installed.cfg
 *.egg
 node_modules/**
+*.json
 
 # ==========================================
 # PyTorch & Machine Learning Artifacts
