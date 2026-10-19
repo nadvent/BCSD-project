@@ -1,0 +1,625 @@
+---
+title: "Blood Cell Semantic Segmentation"
+subtitle: "From Mathematical Formulation in PyTorch to Low-Latency C++17 Edge Inference"
+author: "BSc. Computer Science with Mathematics | AI & ML Systems Engineering Portfolio"
+date: "2026"
+date-format: YYYY
+format:
+  revealjs:
+    theme: default
+    slide-number: c/t
+    transition: fade
+    background-transition: fade
+    html-math-method: katex
+    code-line-numbers: true
+    code-fold: false
+    highlight-style: github
+    embed-resources: true
+    width: 1280
+    height: 720
+    margin: 0.08
+    footer: "Blood Cell Segmentation Pipeline | PyTorch Training (`src/python/`) & C++17 ONNX Runtime (`src/cpp/`)"
+execute:
+  echo: true
+  eval: false
+  freeze: auto
+---
+
+```{=html}
+<style>
+.reveal {
+  font-size: 26px;
+}
+.reveal h1, .reveal h2, .reveal h3 {
+  color: #1e293b;
+  font-weight: 700;
+}
+.reveal h2 {
+  border-bottom: 2px solid #e2e8f0;
+  padding-bottom: 0.25em;
+  margin-bottom: 0.6em;
+}
+.reveal table {
+  font-size: 0.78em;
+  border-collapse: collapse;
+  width: 100%;
+}
+.reveal table th {
+  background-color: #f1f5f9;
+  color: #0f172a;
+  font-weight: 600;
+  padding: 8px 12px;
+  border-bottom: 2px solid #cbd5e1;
+}
+.reveal table td {
+  padding: 7px 12px;
+  border-bottom: 1px solid #e2e8f0;
+}
+.reveal pre code {
+  font-size: 0.76em;
+  line-height: 1.38;
+  max-height: 520px;
+}
+.metric-box {
+  background: #f8fafc;
+  border-left: 4px solid #2563eb;
+  padding: 0.55em 0.85em;
+  margin-bottom: 0.6em;
+  border-radius: 4px;
+  font-size: 0.88em;
+}
+</style>
+```
+
+## Slide 1: End-to-End ML Systems Architecture {.smaller}
+
+### Bridging Mathematical Rigor in PyTorch with Deterministic C++17 Edge Deployment
+
+:::: {.columns}
+
+::: {.column width="50%"}
+#### Python Research & Training (`src/python/`)
+1. **Synchronized `transforms.v2` Pipeline** (`dataset.py`)
+   - Bilinear image scaling ($I \in \mathbb{R}^{3 \times 416 \times 416}$) + Nearest-Neighbor mask projection ($Y \in \{0,1\}^{1 \times 416 \times 416}$).
+2. **Custom U-Net Architecture** (`model.py`)
+   - $31.04\text{M}$ parameters; supports unpadded (`padding=0`, $228\times 228$ output with `_center_crop` skip connections) & padded (`padding=1`, $416\times 416$) modes.
+3. **Composite BCE + Soft Dice Optimization** (`train.py`, `evaluate.py`)
+   - Log-sum-exp stabilized `BCEWithLogitsLoss` paired with continuous Frobenius Soft Dice relaxation.
+4. **Constant-Folded ONNX Export** (`export_onnx.py`)
+   - Fuses `BatchNorm2d` into `Conv2d` (`opset=17`), verified to $\mathbf{2.42 \times 10^{-6}}$ max logit error.
+:::
+
+::: {.column width="50%"}
+#### C++17 Production Inference (`src/cpp/`)
+1. **OpenCV Ingestion & Preprocessing** (`inference_engine.cpp`)
+   - Decodes `BGR` `uint8_t` $\to$ resizes $416\times 416$ $\to$ transposes `HWC` to contiguous planar `NCHW` `RGB` `float32` with ImageNet standardization.
+2. **Zero-Copy ONNX Runtime Binding** (`Ort::Value`)
+   - Binds `std::vector<float>::data()` directly into `Ort::MemoryInfo::CreateCpu` without intermediate heap copies.
+3. **Monotonic Logit Thresholding** ($z > 0.0\text{f}$)
+   - Bypasses $51,984$ `std::exp()` calls per frame via exact logit equivalence.
+4. **Sub-Pixel Membrane Overlay** (`cv::findContours`)
+   - Aligns the $228\times 228$ receptive field ($94\text{ px}$ crop) and renders anti-aliased cell contours.
+:::
+
+::::
+
+::: {.notes}
+Hook the interviewer immediately with the full-stack scope: clinical hematology workstations rarely have heavy Python environments or cloud GPUs available. A production diagnostic pipeline requires mathematically sound training in PyTorch paired with a dependency-light, deterministic C++17 inference binary.
+:::
+
+---
+
+## Slide 2: Clinical Problem & Dataset Formulation {.smaller}
+
+### Formulating Blood Smear Segmentation as Dense Pixel-Wise Classification
+
+:::: {.columns}
+
+::: {.column width="55%"}
+#### Formal Mathematical Problem Definition
+Given a digitized peripheral blood smear microscopy image $I \in \mathbb{R}^{H \times W \times 3}$, we seek a parameterized operator $f_\Theta$ mapping the continuous RGB lattice onto a discrete semantic mask lattice:
+
+$$f_\Theta: \mathbb{R}^{H \times W \times 3} \longrightarrow \mathbb{R}^{H' \times W'} \xrightarrow{\;\sigma(\cdot)\;} [0, 1]^{H' \times W'} \xrightarrow{\;\mathbb{I}(\cdot > \tau)\;} \{0, 1\}^{H' \times W'}$$
+
+*(Directly extensible to the $K$-class simplex $\Delta^{K-1}_{H' \times W'} \to \{0, 1, \dots, K-1\}^{H' \times W'}$ for Background, Erythrocytes/RBCs, Leukocytes/WBCs, and Platelets).*
+
+#### Benchmark Dataset Structure ([BCCD with Mask](https://www.kaggle.com/datasets/jeetblahiri/bccd-dataset-with-mask))
+- **Training Split (`data/train`)**: $1,169$ paired RGB smears (`.jpg`/`.png`) & binary masks (`.png`).
+- **Validation / Test Split (`data/test`)**: $159$ held-out smear-mask pairs for unbiased generalization auditing.
+:::
+
+::: {.column width="45%"}
+::: {.callout-important}
+#### Key Hematological & Computer Vision Challenges
+1. **Severe Scale & Class Imbalance**:
+   - Erythrocytes (RBCs) dominate foreground pixel area, leukocytes (WBCs) exhibit complex lobulated nuclear staining, and platelets occupy tiny fractional areas.
+2. **Boundary Ambiguity & Rouleaux Formations**:
+   - Touching or overlapping cells require crisp membrane localization rather than blurred regional blobs.
+3. **Cross-Format Ground Truth Storage**:
+   - Lossy JPEG compression on masks introduces ringing artifacts ($\notin \{0, 255\}$); our loader enforces stem-matched lossless `.png` resolution and strict binarization $(M > 0)$.
+:::
+:::
+
+::::
+
+::: {.notes}
+Explain how we translate a biological diagnostic bottleneck—manual differential cell counting—into a well-posed dense classification mapping, highlighting why boundary fidelity on touching cells drives every downstream architectural and loss decision.
+:::
+
+---
+
+## Slide 3: Geometry of Synchronized Spatial Augmentations {.smaller}
+
+### Preserving Topological Label Integrity Across Interpolation Spaces (`src/python/dataset.py`)
+
+:::: {.columns}
+
+::: {.column width="48%"}
+#### Synchronized Dihedral Group Action
+Let $g_\theta \in D_2$ (horizontal reflection + spatial scaling) be sampled once per sample pair and applied jointly:
+$$(I', Y') = \bigl(g_\theta(I),\; g_\theta(Y)\bigr), \quad \theta \sim \text{Bernoulli}(0.5)$$
+
+#### Why Distinct Interpolation Kernels Are Mandatory
+- **RGB Images ($I \in \mathbb{R}^{H \times W \times 3}$)**: Intensities reside in a continuous vector space; **Bilinear Interpolation** computes a valid convex combination of the $2 \times 2$ neighborhood:
+  $$I'(x, y) = \sum_{i=0}^{1}\sum_{j=0}^{1} w_{ij}(x, y) \, I\bigl(\lfloor x \rfloor + i, \lfloor y \rfloor + j\bigr)$$
+- **Semantic Masks ($Y \in \{0, \dots, K-1\}^{H \times W}$)**: Discrete nominal lattice with no metric ordering. Linearly interpolating between class $0$ and class $2$ synthesizes a false boundary of class $1$. **Nearest-Neighbor** projection preserves set membership:
+  $$Y'(x, y) = Y\bigl(\operatorname{round}(x), \operatorname{round}(y)\bigr)$$
+:::
+
+::: {.column width="52%"}
+```{.python code-line-numbers="1-6|8-19|21-24|26-31"}
+# src/python/dataset.py (basedpyright strict-checked)
+class VisionDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
+    @override
+    def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
+        image_tensor = cast(torch.Tensor, F.to_image(image))
+        mask_tensor = cast(torch.Tensor, F.to_image(mask))
+
+        # 1. Geometry-aware spatial scaling to 416x416
+        mask_tensor = F.resize(
+            mask_tensor,
+            [416, 416],
+            interpolation=transforms.InterpolationMode.NEAREST,
+        )
+        image_tensor = F.resize(
+            image_tensor,
+            [416, 416],
+            interpolation=transforms.InterpolationMode.BILINEAR,
+        )
+
+        # 2. Synchronized stochastic reflection g_theta
+        if self.is_train and bool(torch.rand(1).item() < 0.5):
+            image_tensor = F.hflip(image_tensor)
+            mask_tensor = F.hflip(mask_tensor)
+
+        # 3. Continuous [0,1] -> ImageNet Z-score vs. strict binary {0.0, 1.0}
+        image_tensor = F.to_dtype(image_tensor, torch.float32, scale=True)
+        image_tensor = cast(torch.Tensor, self.normalize(image_tensor))
+
+        mask_tensor = F.to_dtype(mask_tensor, torch.float32, scale=False)
+        mask_tensor = (mask_tensor > 0).float()
+        return image_tensor, mask_tensor
+```
+:::
+
+::::
+
+::: {.notes}
+Walk through the code blocks step-by-step using the right arrow: highlight that images live in a continuous Euclidean intensity space whereas segmentation masks live in a discrete categorical space, so bilinear vs. nearest-neighbor interpolation is a mathematical necessity, not just a library flag.
+:::
+
+---
+
+## Slide 4: Feature Space Standardization & Hessian Conditioning {.smaller}
+
+### Accelerating Gradient Convergence via Channel-Wise Affine Normalization
+
+:::: {.columns}
+
+::: {.column width="52%"}
+#### Channel-Wise Z-Score Standardization
+Each RGB channel $c \in \{R, G, B\}$ is mapped from $[0, 1]$ to a zero-centered, unit-variance distribution:
+$$\hat{I}_c = \frac{I_c - \mu_c}{\sigma_c}, \quad \begin{aligned}\mu &= [0.485,\; 0.456,\; 0.406] \\ \sigma &= [0.229,\; 0.224,\; 0.225]\end{aligned}$$
+
+#### Optimization & Curvature Conditioning
+- For the first convolutional layer $z = W * \hat{I}$, the Hessian of the loss with respect to weights $W$ satisfies $\mathbf{H}_W \propto \mathbb{E}[\hat{I}\hat{I}^\top]$.
+- Unnormalized inputs ($I_c \in [0, 255]$ or $[0, 1]$ with positive mean) induce a large rank-1 eigenvalue spike, inflating the condition number:
+  $$\kappa(\mathbf{H}_W) = \frac{\lambda_{\max}(\mathbf{H}_W)}{\lambda_{\min}(\mathbf{H}_W)} \gg 1$$
+- Centering ($\mathbb{E}[\hat{I}_c] \approx 0$) and variance scaling ($\operatorname{Var}(\hat{I}_c) \approx 1$) pull $\kappa(\mathbf{H}_W)$ toward $1$, eliminating zig-zagging gradient trajectories and allowing AdamW ($\eta = 10^{-4}$) to converge rapidly within epochs.
+:::
+
+::: {.column width="48%"}
+#### Design Trade-Off: ImageNet vs. Giemsa Stain Statistics
+
+| Normalization Strategy | Mathematical Advantage | Engineering Trade-Off |
+| :--- | :--- | :--- |
+| **ImageNet Moments ($\mu_{\text{IN}}, \sigma_{\text{IN}}$)** | Preserves activation statistics for pre-trained ResNet/ConvNeXt encoders; universal cross-language standard | Slightly off-center for purple/pink Wright–Giemsa background plasma |
+| **Dataset Giemsa Moments ($\mu_{\text{BCCD}}, \sigma_{\text{BCCD}}$)** | Exact $\mathbb{E}[\hat{I}_c] = 0$ on peripheral blood smears | Requires recomputing dataset-wide moments per lab scanner; breaks pre-trained weights |
+
+::: {.callout-note}
+#### Critical Cross-Language Contract
+The exact constants $\mu, \sigma$ in `src/python/dataset.py` are mirrored as `constexpr std::array<float, 3>` in `src/cpp/include/inference_engine.hpp` so C++ inputs lie on the exact same manifold.
+:::
+:::
+
+::::
+
+::: {.notes}
+In interviews, explaining normalization via the eigenvalue spread and condition number of the first-layer Hessian immediately distinguishes a Computer Science & Mathematics graduate from candidates who treat `transforms.Normalize` as boilerplate.
+:::
+
+---
+
+## Slide 5: Architectural Trade-Offs & Custom U-Net Topology {.smaller}
+
+### Comparing Inductive Biases and Receptive Field Geometry (`src/python/model.py`)
+
+| Architecture Family | Core Inductive Bias | Multi-Scale Mechanism | Boundary Precision vs. Compute Trade-Off |
+| :--- | :--- | :--- | :--- |
+| **U-Net (Our Custom Implementation)** | Translation equivariance + dense multi-scale skip connections | Symmetric 4-stage encoder-decoder concatenation (`31.04M` params) | Sharpest cell membrane localization; deterministic latency on CPU/edge |
+| **DeepLabV3+** | Multi-scale context via dilated kernels | Atrous Spatial Pyramid Pooling (ASPP) | Captures global context without pooling loss; dilated gridding artifacts can miss tiny platelets |
+| **SegFormer / ViT** | Global self-attention ($\mathcal{O}(N^2)$ token interaction) | Hierarchical patch merging + MLP decoder | Strong long-range semantics; weaker local edge prior and higher C++ runtime overhead |
+
+:::: {.columns}
+
+::: {.column width="52%"}
+#### Exact Spatial Recurrence in Our `UNet` (`padding=0` vs. `padding=1`)
+- **DoubleConv Block**: Two $3\times 3$ convolutions (`bias=False` since `BatchNorm2d` affine shift $\beta_c$ absorbs any additive bias) + `BatchNorm2d` + `ReLU(inplace=True)`.
+- **Unpadded Mode (`padding=0`, Ronneberger et al. 2015)**:
+  - Each `DoubleConv` reduces height and width by $4\text{ px}$; across 4 encoder stages ($64 \to 128 \to 256 \to 512$), bottleneck ($1024$), and 4 decoder stages:
+  $$H_{\text{in}} = 416 \longrightarrow H_{\text{bottleneck}} = 24 \longrightarrow H_{\text{out}} = 228$$
+  - Eliminates zero-padding border hallucination; uses `_center_crop` on encoder skip tensors and a $94\text{ px}$ target border crop.
+:::
+
+::: {.column width="48%"}
+```{.python code-line-numbers="1-10|12-20"}
+# src/python/model.py: Copy-and-Crop Skip Alignment
+@staticmethod
+def _center_crop(
+    encoder_tensor: torch.Tensor,
+    target_height: int,
+    target_width: int,
+) -> torch.Tensor:
+    _, _, h, w = encoder_tensor.shape
+    diff_y: int = (h - target_height) // 2
+    diff_x: int = (w - target_width) // 2
+    return encoder_tensor[
+        :, :, diff_y : diff_y + target_height, diff_x : diff_x + target_width
+    ]
+
+# Inside UNet.forward():
+d4 = cast(torch.Tensor, self.up4(b))               # [B, 512, 40, 40]
+e4_cropped = self._center_crop(e4, d4.shape[2], d4.shape[3])
+d4 = torch.cat([e4_cropped, d4], dim=1)            # [B, 1024, 40, 40]
+d4 = cast(torch.Tensor, self.dec4(d4))             # [B, 512, 32, 32]
+```
+:::
+
+::::
+
+::: {.notes}
+Explain why peripheral blood smears rely on local morphology and sharp cell boundaries rather than global scene context, making U-Net's dense skip pathways ideal. Also point out why setting `bias=False` before `BatchNorm2d` saves redundant parameters.
+:::
+
+---
+
+## Slide 6: Loss Landscape Design (`BCEDiceLoss`) {.smaller}
+
+### Combining Log-Sum-Exp Pixel Cross-Entropy with Differentiable Frobenius Dice Relaxation
+
+:::: {.columns}
+
+::: {.column width="52%"}
+#### 1. Logit-Stabilized Binary Cross-Entropy ($\mathcal{L}_{\text{BCE}}$)
+Treating each pixel $i \in \{1, \dots, N\}$ ($N = 228^2 = 51,984$) as an independent Bernoulli trial with raw logit $z_i \in \mathbb{R}$ and probability $p_i = \sigma(z_i)$:
+$$\mathcal{L}_{\text{BCE}}(z, y) = \frac{1}{N} \sum_{i=1}^{N} \Bigl[ \max(z_i, 0) - z_i y_i + \ln\bigl(1 + e^{-|z_i|}\bigr) \Bigr]$$
+- **Strength**: Smooth, strictly convex gradient $\frac{\partial \mathcal{L}_{\text{BCE}}}{\partial z_i} = \frac{1}{N}(p_i - y_i)$.
+- **Limitation**: Weights all pixels equally, allowing majority background regions to dominate minor cell classes.
+
+#### 2. Continuous Soft Dice Relaxation ($\mathcal{L}_{\text{Dice}}$)
+Using the Frobenius inner product $\langle p, y \rangle_F = \sum_{i=1}^N p_i y_i$ and $L_1$ norms:
+$$\mathcal{L}_{\text{Dice}}(p, y) = 1 - \frac{2 \langle p, y \rangle_F + \epsilon}{\|p\|_1 + \|y\|_1 + \epsilon}, \quad \epsilon = 10^{-6}$$
+- **Composite Objective** ($\alpha = 0.5$):
+  $$\mathcal{L}_{\text{total}}(z, y) = 0.5 \, \mathcal{L}_{\text{BCE}}(z, y) + 0.5 \, \mathcal{L}_{\text{Dice}}\bigl(\sigma(z), y\bigr)$$
+:::
+
+::: {.column width="48%"}
+```{.python code-line-numbers="1-6|8-14|16-26"}
+# src/python/evaluate.py
+@final
+class BCEDiceLoss(nn.Module):
+    def __init__(self, bce_weight: float = 0.5, smooth: float = 1e-6) -> None:
+        super().__init__()
+        self.bce_weight = bce_weight
+        self.smooth = smooth
+        self.bce_loss = nn.BCEWithLogitsLoss()
+
+    @override
+    def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        targets_aligned = align_target_mask(logits, targets)
+
+        # 1. Numerically stable Log-Sum-Exp BCE on raw logits
+        bce = cast(torch.Tensor, self.bce_loss(logits, targets_aligned))
+
+        # 2. Differentiable Soft Dice on continuous probabilities
+        probs = torch.sigmoid(logits)
+        probs_flat = probs.contiguous().view(probs.shape[0], -1)
+        targets_flat = targets_aligned.contiguous().view(probs.shape[0], -1)
+
+        intersection = (probs_flat * targets_flat).sum(dim=1)
+        cardinality = probs_flat.sum(dim=1) + targets_flat.sum(dim=1)
+
+        soft_dice = (2.0 * intersection + self.smooth) / (cardinality + self.smooth)
+        return self.bce_weight * bce + (1.0 - self.bce_weight) * (1.0 - soft_dice.mean())
+```
+:::
+
+::::
+
+::: {.notes}
+Highlight why neither loss alone is ideal: BCE suffers under foreground/background imbalance, whereas Soft Dice has rational quotient-rule gradients that can oscillate early in training when $\|p\|_1 + \|y\|_1$ is small. Their convex combination gives fast initial convergence and tight final boundary alignment.
+:::
+
+---
+
+## Slide 7: Set-Theoretic Validation Metrics {.smaller}
+
+### Evaluating Spatial Overlap via Sørensen–Dice ($F_1$) and Jaccard Index (IoU)
+
+:::: {.columns}
+
+::: {.column width="52%"}
+#### Discrete Set-Theoretic Definitions
+Given binarized prediction set $P = \{i : \sigma(z_i) > 0.5\}$ and ground-truth set $G = \{i : y_i = 1\}$:
+
+$$\text{IoU}(P, G) = J = \frac{|P \cap G|}{|P \cup G|} = \frac{\text{TP}}{\text{TP} + \text{FP} + \text{FN}}$$
+
+$$\text{Dice}(P, G) = D = \frac{2|P \cap G|}{|P| + |G|} = \frac{2\text{TP}}{2\text{TP} + \text{FP} + \text{FN}}$$
+
+#### Functional Bijection & Inequality
+On any single sample, $J$ and $D$ are linked by a strict homeomorphism on $[0, 1]$:
+$$J = \frac{D}{2 - D} \Longleftrightarrow D = \frac{2J}{1 + J}, \qquad J \le D \;\;\forall D \in [0, 1]$$
+:::
+
+::: {.column width="48%"}
+#### Why Track Both Across the Test Dataset?
+Because $g(D) = \frac{D}{2 - D}$ is **strictly convex** on $[0, 1)$ ($g''(D) = \frac{4}{(2-D)^3} > 0$), Jensen's Inequality implies that dataset averages diverge when variance is present across images:
+
+- **Mean Dice ($\mathbb{E}[D]$)**: Reflects average harmonic boundary agreement ($F_1$ score).
+- **Mean IoU ($\mathbb{E}[J]$)**: Penalizes worst-case single-image boundary failures much more severely than Mean Dice—essential for clinical quality assurance.
+
+<div class="metric-box">
+**Empirical Consistency Check on `data/test` ($159$ smears):**
+Theoretical single-sample transform of $\bar{D} = 0.9475$ gives $\frac{0.9475}{2 - 0.9475} = 0.9002$; our actual dataset mean IoU is **$\bar{J} = 0.9050$**, confirming tight, low-variance performance across the entire test cohort.
+</div>
+:::
+
+::::
+
+::: {.notes}
+This slide showcases mathematical maturity: using convexity and Jensen's Inequality to explain why dataset-mean IoU and dataset-mean Dice convey different distributional information about outlier failure cases.
+:::
+
+---
+
+## Slide 8: Graph Compilation & Constant Folding (`export_onnx.py`) {.smaller}
+
+### Bridging Dynamic PyTorch Eager Execution to Static ONNX Runtime
+
+:::: {.columns}
+
+::: {.column width="50%"}
+#### Algebraic Conv2d + BatchNorm2d Fusion
+Calling `model.eval()` freezes running batch statistics $(\hat{\mu}_c, \hat{\sigma}_c^2)$. During `torch.onnx.export(..., do_constant_folding=True, opset_version=17)`, each `BatchNorm2d` layer is algebraically absorbed into the preceding $3 \times 3$ `Conv2d` weights $W_c$ and bias $\tilde{b}_c$:
+
+$$y_c = \gamma_c \frac{(W_c * x) - \hat{\mu}_c}{\sqrt{\hat{\sigma}_c^2 + \epsilon}} + \beta_c \;\equiv\; \tilde{W}_c * x + \tilde{b}_c$$
+
+where the folded parameters are pre-computed at export time:
+$$\tilde{W}_c = \frac{\gamma_c}{\sqrt{\hat{\sigma}_c^2 + \epsilon}} W_c, \qquad \tilde{b}_c = -\frac{\gamma_c \hat{\mu}_c}{\sqrt{\hat{\sigma}_c^2 + \epsilon}} + \beta_c$$
+
+- **Runtime Impact**: Eliminates **18 separate BatchNorm tensor passes** per inference frame in C++.
+:::
+
+::: {.column width="50%"}
+```{.python code-line-numbers="1-11|13-22"}
+# src/python/export_onnx.py
+model = UNet(in_channels=3, out_channels=1, padding=0).to(device)
+model.load_state_dict(torch.load(weights_path, weights_only=True))
+model.eval()  # Freezes BatchNorm stats for constant folding
+
+dummy_input = torch.randn(1, 3, 416, 416, dtype=torch.float32)
+torch.onnx.export(
+    model, (dummy_input,), str(output_path),
+    export_params=True, opset_version=17,
+    do_constant_folding=True,
+    input_names=["input"], output_names=["logits"],
+)
+
+# Numerical Parity Audit: PyTorch Eager vs. ONNX Runtime
+ort_session = ort.InferenceSession(str(output_path), providers=["CPUExecutionProvider"])
+ort_logits = np.asarray(ort_session.run(["logits"], {"input": dummy_input.numpy()})[0])
+max_abs_diff = float(np.max(np.abs(pytorch_out.numpy() - ort_logits)))
+# Verified Output:
+# Numerical parity verified! Max absolute difference: 2.42e-06
+```
+
+<div class="metric-box">
+**Verified Graph Parity (`outputs/model.onnx`)**:
+$$\max_{i \in \{1, \dots, 51984\}} \bigl|z_{\text{PyTorch}}^{(i)} - z_{\text{ONNX}}^{(i)}\bigr| = \mathbf{2.42 \times 10^{-6}} < 10^{-5}$$
+</div>
+:::
+
+::::
+
+::: {.notes}
+Explain how calling `model.eval()` before `torch.onnx.export` allows constant folding to collapse every BatchNorm layer into the preceding convolution's weights and bias, and how we verified IEEE-754 FP32 parity to $2.42 \times 10^{-6}$ before touching C++.
+:::
+
+---
+
+## Slide 9: Low-Latency C++17 Inference Engine (`src/cpp/`) {.smaller}
+
+### Memory Layout Transposition, Zero-Copy Binding & Monotonic Logit Thresholding
+
+:::: {.columns}
+
+::: {.column width="46%"}
+#### 1. `HWC` (`BGR`) $\to$ `NCHW` (`RGB`) Planar Layout
+- `cv::imread` allocates interleaved row-major `BGR` bytes: $(y \cdot W + x)\cdot 3 + c$.
+- `SegmentationEngine::preprocess` converts to `RGB` `float32` and writes directly into 3 contiguous planar slices of length $H \cdot W = 173,056$:
+  $$\text{idx}(c, y, x) = c \cdot (H W) + y \cdot W + x$$
+
+#### 2. Zero-Copy `Ort::Value` Tensor Wrapping
+- Wraps `input_data.data()` directly in CPU arena memory without duplicating the $2.08\text{ MB}$ float buffer.
+
+#### 3. Monotonic Logit Thresholding Optimization
+- Since $\sigma(z) = (1 + e^{-z})^{-1}$ is strictly increasing on $\mathbb{R}$:
+  $$\sigma(z) > \tau \iff z > \ln\!\left(\frac{\tau}{1 - \tau}\right)$$
+- For $\tau = 0.5$, $\ln(1) = 0.0\text{f}$: thresholding `z > 0.0f` **eliminates $51,984$ `std::exp()` calls per image**.
+:::
+
+::: {.column width="54%"}
+```{.cpp code-line-numbers="1-9|11-18|20-31"}
+// src/cpp/src/inference_engine.cpp
+// 1. Planar NCHW pointer stride arithmetic + ImageNet Z-score
+float* r_plane = input_tensor.data();
+float* g_plane = input_tensor.data() + hw;
+float* b_plane = input_tensor.data() + 2 * hw;
+for (int y = 0; y < input_height_; ++y) {
+    const cv::Vec3f* row_ptr = float_rgb.ptr<cv::Vec3f>(y);
+    for (int x = 0; x < input_width_; ++x) {
+        const int idx = y * input_width_ + x;
+        r_plane[idx] = (row_ptr[x][0] - kImageNetMean[0]) / kImageNetStd[0];
+        g_plane[idx] = (row_ptr[x][1] - kImageNetMean[1]) / kImageNetStd[1];
+        b_plane[idx] = (row_ptr[x][2] - kImageNetMean[2]) / kImageNetStd[2];
+    }
+}
+
+// 2. Zero-copy Ort::Value tensor binding & session execution
+Ort::Value input_ort = Ort::Value::CreateTensor<float>(
+    memory_info, input_data.data(), input_data.size(),
+    input_shape.data(), input_shape.size());
+auto output_tensors = session_->Run(
+    Ort::RunOptions{nullptr}, input_names, &input_ort, 1, output_names, 1);
+
+// 3. Monotonic logit threshold (z > 0.0f) + OpenCV contour extraction
+const float logit_thresh = std::log(prob_threshold / (1.0f - prob_threshold));
+for (int y = 0; y < out_h; ++y) {
+    uchar* mask_row = out_binary_mask.ptr<uchar>(y);
+    for (int x = 0; x < out_w; ++x)
+        mask_row[x] = (logits[y * out_w + x] > logit_thresh) ? 255 : 0;
+}
+cv::findContours(out_binary_mask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+cv::drawContours(out_contour_overlay, contours, -1, cv::Scalar(0, 0, 255), 2, cv::LINE_AA);
+```
+:::
+
+::::
+
+::: {.notes}
+Walk through the three systems optimizations in `inference_engine.cpp`: (1) contiguous planar NCHW layout for cache-friendly SIMD loads, (2) zero-copy tensor wrapping via `Ort::Value::CreateTensor`, and (3) avoiding 51,984 transcendental `std::exp()` calls by thresholding raw logits directly at `0.0f`.
+:::
+
+---
+
+## Slide 10: Empirical Results, Visual Verification & Error Analysis {.smaller}
+
+:::: {.columns}
+
+::: {.column width="44%"}
+#### Training & Held-Out Test Benchmark (`159` Smears)
+
+| Stage / Split | Combined Loss $\downarrow$ | Mean Dice ($F_1$) $\uparrow$ | Mean IoU ($J$) $\uparrow$ | Pixel Acc $\uparrow$ |
+| :--- | :---: | :---: | :---: | :---: |
+| **Epoch 01 (Val)** | `0.2081` | `0.9118` | `0.8604` | — |
+| **Epoch 02 (Train)** | `0.1471` | `0.9494` | — | — |
+| **Final Test (`data/test`)** | **`0.1262`** | **`0.9475`** | **`0.9050`** | **`0.9660`** |
+
+#### Failure Mode & Edge-Case Analysis
+1. **Touching Erythrocytes (Rouleaux Bridges)**:
+   - Binary semantic segmentation merges adjacent cell membranes separated by $< 2\text{ px}$ into a single connected component in `cv::findContours`.
+2. **Unpadded Receptive Field Margin ($94\text{ px}$)**:
+   - With `padding=0`, cells near the outer $94\text{ px}$ frame border are excluded from the $228\times 228$ output; solved via reflection tiling or `padding=1`.
+:::
+
+::: {.column width="56%"}
+![C++17 ONNX Runtime Inference Verification: Input Smear ($228\times 228$), Ground Truth Mask, C++ Binary Mask ($z > 0.0\text{f}$), and OpenCV Membrane Contours (`cv::drawContours`)](cpp_inference_comparison.png){width="100%"}
+:::
+
+::::
+
+::: {.notes}
+Point to the empirical metrics table—achieving a 0.9475 Dice score and 0.9050 IoU on the 159-image test split—and walk the interviewer through the 4-column visual comparison plot showing sub-pixel contour agreement as well as honest engineering analysis of touching cells.
+:::
+
+---
+
+## Slide 11: Engineering Takeaways & Production Roadmap {.smaller}
+
+### Scaling From Research Prototype to Clinical Hematology Production
+
+:::: {.columns}
+
+::: {.column width="50%"}
+#### Core Systems & Mathematical Takeaways
+1. **End-to-End Type & Memory Safety**:
+   - Strict static typing in Python (`basedpyright` + `ruff`) paired with RAII-managed `-Wall -Wextra -Wpedantic` C++17 (`std::unique_ptr<Ort::Session>`) prevents silent tensor shape or pointer bugs.
+2. **Mathematical Shortcut $\implies$ Systems Speedup**:
+   - Folding `BatchNorm2d` into `Conv2d` during ONNX export and exploiting sigmoid monotonicity ($z > 0.0\text{f}$) reduce runtime compute without sacrificing a single bit of classification accuracy.
+3. **Standalone Deployment Portability**:
+   - The compiled `./inference_app` binary runs natively on Linux clinical workstations without a Python interpreter or GIL contention.
+:::
+
+::: {.column width="50%"}
+#### Concrete Next Steps for Clinical Deployment
+1. **Topological Instance Separation (Watershed)**:
+   - Compute the Euclidean Distance Transform $\text{EDT}(P)$ on predicted binary masks to locate local maxima as cell centroids, then apply Marker-Controlled Watershed to split touching RBCs.
+2. **Macenko Optical Density Stain Normalization**:
+   - Transform RGB intensities to Optical Density space ($\text{OD} = -\log_{10}(I / I_0)$) and apply SVD stain-vector decomposition to normalize Wright–Giemsa variations across hospital scanners.
+3. **Hardware Execution Providers & Quantization**:
+   - Enable `OrtTensorRTProviderOptions` (FP16) or post-training **INT8 calibration** ($4\times$ weight compression) for embedded point-of-care hematology analyzers.
+:::
+
+::::
+
+::: {.notes}
+Close by summarizing how every design choice—from interpolation spaces and composite loss geometry to constant folding and C++ memory layout—connects mathematical theory to production engineering, and invite questions on either the derivations or the C++ implementation.
+:::
+
+---
+
+## Backup Slide A1: Exact Soft Dice Gradient Derivation (Q&A) {.smaller}
+
+### Quotient-Rule Derivation of $\frac{\partial \mathcal{L}_{\text{Dice}}}{\partial z_k}$ for Backpropagation Analysis
+
+Let $p_i = \sigma(z_i) \in (0, 1)$ and $y_i \in \{0, 1\}$. Define the intersection $I(p) = \sum_{i=1}^N p_i y_i$ and cardinality sum $U(p) = \sum_{i=1}^N p_i + \sum_{i=1}^N y_i$, so that:
+
+$$\mathcal{L}_{\text{Dice}}(p, y) = 1 - \frac{2 I(p) + \epsilon}{U(p) + \epsilon}$$
+
+Differentiating with respect to a single pixel's predicted probability $p_k$ ($\text{where } \frac{\partial I}{\partial p_k} = y_k \text{ and } \frac{\partial U}{\partial p_k} = 1$):
+
+$$\frac{\partial \mathcal{L}_{\text{Dice}}}{\partial p_k} = -\frac{2 y_k \bigl(U(p) + \epsilon\bigr) - 1 \cdot \bigl(2 I(p) + \epsilon\bigr)}{\bigl(U(p) + \epsilon\bigr)^2} = \frac{2 I(p) + \epsilon - 2 y_k \bigl(U(p) + \epsilon\bigr)}{\bigl(\|p\|_1 + \|y\|_1 + \epsilon\bigr)^2}$$
+
+Applying the chain rule through the logistic sigmoid derivative $\frac{\partial p_k}{\partial z_k} = p_k(1 - p_k)$:
+
+$$\frac{\partial \mathcal{L}_{\text{Dice}}}{\partial z_k} = \left[\frac{2 \langle p, y \rangle_F + \epsilon - 2 y_k \bigl(\|p\|_1 + \|y\|_1 + \epsilon\bigr)}{\bigl(\|p\|_1 + \|y\|_1 + \epsilon\bigr)^2}\right] p_k (1 - p_k)$$
+
+- **Why Combining with $\mathcal{L}_{\text{BCE}}$ Stabilizes Training**: When foreground area $\|y\|_1$ is small, the denominator $(\|p\|_1 + \|y\|_1 + \epsilon)^2$ can cause high gradient variance; adding $\frac{\partial \mathcal{L}_{\text{BCE}}}{\partial z_k} = \frac{1}{N}(p_k - y_k)$ anchors pixel-wise descent directions even when $p_k \to 0$ or $1$.
+
+---
+
+## Backup Slide A2: Runtime Benchmarking Methodology (Q&A) {.smaller}
+
+### Rigorous Protocol: C++17 ONNX Runtime vs. Python `torch.compile()`
+
+| Benchmark Dimension | Python Eager (`nn.Module`) | Python `torch.compile(mode="max-autotune")` | C++17 `bcsd::SegmentationEngine` (ONNX Runtime) |
+| :--- | :--- | :--- | :--- |
+| **Graph Optimizations** | None (per-op dispatcher overhead) | TorchInductor operator fusion + Triton kernels | Static constant folding + `ORT_ENABLE_ALL` graph fusion |
+| **Cold-Start / Warmup** | Fast ($\sim 0.2\text{ s}$) | Slow ($\sim 15\text{–}40\text{ s}$ JIT compilation on first batch) | Instantaneous ($\sim 30\text{ ms}$ session load) |
+| **Memory Footprint (`RSS`)** | $\sim 1.2\text{–}2.5\text{ GB}$ (Python + PyTorch runtime) | $\sim 1.8\text{–}3.0\text{ GB}$ (compiler caches + CUDA context) | **$< 150\text{ MB}$** (standalone native binary) |
+| **Latency Tail ($p_{99}$)** | Subject to Python GC & GIL jitter | Low on GPU ($B > 1$), higher dispatch overhead on CPU ($B=1$) | **Deterministic low $p_{99}$ variance** for real-time $B=1$ streams |
+
+#### Key Benchmarking Rules Used in Evaluation
+1. **Isolate Forward Pass ($T_{\text{infer}}$) vs. End-to-End ($T_{\text{e2e}}$)**: Time `session_->Run()` separately from `cv::imread`/`preprocess`/`postprocess`.
+2. **Mandatory Warm-Up ($W = 20$ iterations)**: Exclude initial memory arena allocation and JIT autotuning from steady-state percentiles ($p_{50}, p_{90}, p_{99}$).
+3. **Device Synchronization**: Call `torch.cuda.synchronize()` before and after `time.perf_counter()` when benchmarking GPU execution providers.

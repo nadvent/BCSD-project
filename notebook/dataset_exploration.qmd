@@ -34,7 +34,7 @@ import matplotlib.pyplot as plt
 # 1. Resolve project root reliably (whether cwd is /notebook or project root)
 cwd = Path.cwd()
 project_root = cwd if (cwd / "data").exists() else cwd.parent
-src_dir = str(project_root / "src" / "python_pl")
+src_dir = str(project_root / "src" / "python")
 
 # 2. Insert at index 0 so Python prioritizes your folder over any system packages
 if src_dir not in sys.path:
