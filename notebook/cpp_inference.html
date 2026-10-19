@@ -1,0 +1,889 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
+
+<meta charset="utf-8">
+<meta name="generator" content="quarto-1.9.37">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+
+<meta name="author" content="Vision ML Project">
+<meta name="dcterms.date" content="2026-10-18">
+
+<title>C++ ONNX Runtime Inference Engine &amp; Project Conclusions</title>
+<style>
+/* Default styles provided by pandoc.
+** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
+*/
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: min(4vw, 1.5em);}
+div.column{flex: auto; overflow-x: auto;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+  width: 0.8em;
+  margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
+  vertical-align: middle;
+}
+/* CSS for syntax highlighting */
+html { -webkit-text-size-adjust: 100%; }
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+  { counter-reset: source-line 0; }
+pre.numberSource code > span
+  { position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+  { content: counter(source-line);
+    position: relative; left: -1em; text-align: right; vertical-align: baseline;
+    border: none; display: inline-block;
+    -webkit-touch-callout: none; -webkit-user-select: none;
+    -khtml-user-select: none; -moz-user-select: none;
+    -ms-user-select: none; user-select: none;
+    padding: 0 4px; width: 4em;
+  }
+pre.numberSource { margin-left: 3em;  padding-left: 4px; }
+div.sourceCode
+  {   }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+</style>
+
+
+<script src="cpp_inference_files/libs/clipboard/clipboard.min.js"></script>
+<script src="cpp_inference_files/libs/quarto-html/quarto.js" type="module"></script>
+<script src="cpp_inference_files/libs/quarto-html/tabsets/tabsets.js" type="module"></script>
+<script src="cpp_inference_files/libs/quarto-html/popper.min.js"></script>
+<script src="cpp_inference_files/libs/quarto-html/tippy.umd.min.js"></script>
+<script src="cpp_inference_files/libs/quarto-html/anchor.min.js"></script>
+<link href="cpp_inference_files/libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="cpp_inference_files/libs/quarto-html/quarto-syntax-highlighting-7f8f88aac4f3542376d5c11b86a4c14d.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<script src="cpp_inference_files/libs/bootstrap/bootstrap.min.js"></script>
+<link href="cpp_inference_files/libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="cpp_inference_files/libs/bootstrap/bootstrap-67270d1595a62d14f123c043d4fb2f18.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+
+  <script src="https://cdnjs.cloudflare.com/polyfill/v3/polyfill.min.js?features=es6"></script>
+  <script defer="" src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml-full.js" type="text/javascript"></script>
+
+<script type="text/javascript">
+const typesetMath = (el) => {
+  if (window.MathJax) {
+    // MathJax Typeset
+    window.MathJax.typeset([el]);
+  } else if (window.katex) {
+    // KaTeX Render
+    var mathElements = el.getElementsByClassName("math");
+    var macros = [];
+    for (var i = 0; i < mathElements.length; i++) {
+      var texText = mathElements[i].firstChild;
+      if (mathElements[i].tagName == "SPAN" && texText && texText.data) {
+        window.katex.render(texText.data, mathElements[i], {
+          displayMode: mathElements[i].classList.contains('display'),
+          throwOnError: false,
+          macros: macros,
+          fleqn: false
+        });
+      }
+    }
+  }
+}
+window.Quarto = {
+  typesetMath
+};
+</script>
+
+</head>
+
+<body class="quarto-light">
+
+<div id="quarto-content" class="page-columns page-rows-contents page-layout-article">
+<div id="quarto-margin-sidebar" class="sidebar margin-sidebar">
+  <nav id="TOC" role="doc-toc" class="toc-active">
+    <h2 id="toc-title">Table of contents</h2>
+   
+  <ul>
+  <li><a href="#overview" id="toc-overview" class="nav-link active" data-scroll-target="#overview"><span class="header-section-number">1</span> Overview</a>
+  <ul class="collapse">
+  <li><a href="#end-to-end-project-scorecard" id="toc-end-to-end-project-scorecard" class="nav-link" data-scroll-target="#end-to-end-project-scorecard"><span class="header-section-number">1.1</span> End-to-End Project Scorecard</a></li>
+  </ul></li>
+  <li><a href="#how-the-c-inference-engine-works-with-onnx-runtime" id="toc-how-the-c-inference-engine-works-with-onnx-runtime" class="nav-link" data-scroll-target="#how-the-c-inference-engine-works-with-onnx-runtime"><span class="header-section-number">2</span> How the C++ Inference Engine Works with ONNX Runtime</a>
+  <ul class="collapse">
+  <li><a href="#static-onnx-graph-constant-folding" id="toc-static-onnx-graph-constant-folding" class="nav-link" data-scroll-target="#static-onnx-graph-constant-folding"><span class="header-section-number">2.1</span> 1. Static ONNX Graph &amp; Constant Folding</a></li>
+  <li><a href="#memory-layout-transformation-interleaved-textbgr_texthwc-to-planar-textrgb_textnchw" id="toc-memory-layout-transformation-interleaved-textbgr_texthwc-to-planar-textrgb_textnchw" class="nav-link" data-scroll-target="#memory-layout-transformation-interleaved-textbgr_texthwc-to-planar-textrgb_textnchw"><span class="header-section-number">2.2</span> 2. Memory Layout Transformation: Interleaved <span class="math inline">\(\text{BGR}_{\text{HWC}} \to\)</span> Planar <span class="math inline">\(\text{RGB}_{\text{NCHW}}\)</span></a></li>
+  <li><a href="#zero-copy-tensor-binding" id="toc-zero-copy-tensor-binding" class="nav-link" data-scroll-target="#zero-copy-tensor-binding"><span class="header-section-number">2.3</span> 3. Zero-Copy Tensor Binding</a></li>
+  <li><a href="#mathematical-postprocessing-shortcut-eliminating-51984-stdexp-calls" id="toc-mathematical-postprocessing-shortcut-eliminating-51984-stdexp-calls" class="nav-link" data-scroll-target="#mathematical-postprocessing-shortcut-eliminating-51984-stdexp-calls"><span class="header-section-number">2.4</span> 4. Mathematical Postprocessing Shortcut: Eliminating <span class="math inline">\(51,984\)</span> <code>std::exp()</code> Calls</a></li>
+  </ul></li>
+  <li><a href="#running-c-in-quarto-xeus-cling-vs.-compiled-binary-integration" id="toc-running-c-in-quarto-xeus-cling-vs.-compiled-binary-integration" class="nav-link" data-scroll-target="#running-c-in-quarto-xeus-cling-vs.-compiled-binary-integration"><span class="header-section-number">3</span> Running C++ in Quarto: <code>xeus-cling</code> vs.&nbsp;Compiled Binary Integration</a>
+  <ul class="collapse">
+  <li><a href="#approach-a-interactive-c-cells-via-xeus-cling" id="toc-approach-a-interactive-c-cells-via-xeus-cling" class="nav-link" data-scroll-target="#approach-a-interactive-c-cells-via-xeus-cling"><span class="header-section-number">3.1</span> Approach A: Interactive C++ Cells via <code>xeus-cling</code></a></li>
+  <li><a href="#approach-b-invoking-the-compiled-c-binary-visualizing-outputs-recommended" id="toc-approach-b-invoking-the-compiled-c-binary-visualizing-outputs-recommended" class="nav-link" data-scroll-target="#approach-b-invoking-the-compiled-c-binary-visualizing-outputs-recommended"><span class="header-section-number">3.2</span> Approach B: Invoking the Compiled C++ Binary &amp; Visualizing Outputs (Recommended)</a></li>
+  </ul></li>
+  <li><a href="#visual-comparison-input-blood-smear-vs.-c-inference-outputs" id="toc-visual-comparison-input-blood-smear-vs.-c-inference-outputs" class="nav-link" data-scroll-target="#visual-comparison-input-blood-smear-vs.-c-inference-outputs"><span class="header-section-number">4</span> Visual Comparison: Input Blood Smear vs.&nbsp;C++ Inference Outputs</a>
+  <ul class="collapse">
+  <li><a href="#static-reference-comparison" id="toc-static-reference-comparison" class="nav-link" data-scroll-target="#static-reference-comparison"><span class="header-section-number">4.1</span> Static Reference Comparison</a></li>
+  </ul></li>
+  <li><a href="#final-project-conclusions" id="toc-final-project-conclusions" class="nav-link" data-scroll-target="#final-project-conclusions"><span class="header-section-number">5</span> Final Project Conclusions</a>
+  <ul class="collapse">
+  <li><a href="#mathematical-architectural-takeaways" id="toc-mathematical-architectural-takeaways" class="nav-link" data-scroll-target="#mathematical-architectural-takeaways"><span class="header-section-number">5.1</span> 1. Mathematical &amp; Architectural Takeaways</a></li>
+  <li><a href="#systems-deployment-effectiveness" id="toc-systems-deployment-effectiveness" class="nav-link" data-scroll-target="#systems-deployment-effectiveness"><span class="header-section-number">5.2</span> 2. Systems &amp; Deployment Effectiveness</a></li>
+  <li><a href="#future-extensions" id="toc-future-extensions" class="nav-link" data-scroll-target="#future-extensions"><span class="header-section-number">5.3</span> 3. Future Extensions</a></li>
+  </ul></li>
+  </ul>
+</nav>
+</div>
+<main class="content" id="quarto-document-content">
+
+<header id="title-block-header" class="quarto-title-block default">
+<div class="quarto-title">
+<h1 class="title">C++ ONNX Runtime Inference Engine &amp; Project Conclusions</h1>
+<p class="subtitle lead">Production Deployment, Memory Architecture, and End-to-End Visual Verification</p>
+</div>
+
+
+
+<div class="quarto-title-meta">
+
+    <div>
+    <div class="quarto-title-meta-heading">Author</div>
+    <div class="quarto-title-meta-contents">
+             <p>Vision ML Project </p>
+          </div>
+  </div>
+    
+    <div>
+    <div class="quarto-title-meta-heading">Published</div>
+    <div class="quarto-title-meta-contents">
+      <p class="date">October 18, 2026</p>
+    </div>
+  </div>
+  
+    
+  </div>
+  
+
+
+</header>
+
+
+<section id="overview" class="level2" data-number="1">
+<h2 data-number="1" class="anchored" data-anchor-id="overview"><span class="header-section-number">1</span> Overview</h2>
+<p>This final technical report documents the deployment phase of the <strong>Blood Cell Semantic Segmentation (<code>cppy_pipeline</code>)</strong> project: transitioning from a trained PyTorch research model (<code>best_model.pth</code>) to a standalone, dependency-light <strong>C++17 Inference Engine</strong> powered by <strong>ONNX Runtime</strong> and <strong>OpenCV</strong>.</p>
+<section id="end-to-end-project-scorecard" class="level3" data-number="1.1">
+<h3 data-number="1.1" class="anchored" data-anchor-id="end-to-end-project-scorecard"><span class="header-section-number">1.1</span> End-to-End Project Scorecard</h3>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 25%">
+<col style="width: 25%">
+<col style="width: 25%">
+<col style="width: 25%">
+</colgroup>
+<thead>
+<tr class="header">
+<th style="text-align: left;">Pipeline Stage</th>
+<th style="text-align: left;">Key Artifact</th>
+<th style="text-align: left;">Quantitative Benchmark</th>
+<th style="text-align: left;">Engineering Outcome</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: left;"><strong>1. Data Pipeline</strong></td>
+<td style="text-align: left;"><code>src/python/dataset.py</code></td>
+<td style="text-align: left;"><span class="math inline">\(1,169\)</span> train / <span class="math inline">\(159\)</span> test samples</td>
+<td style="text-align: left;">Paired <code>transforms.v2</code>, nearest-neighbor mask resize</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;"><strong>2. Model Architecture</strong></td>
+<td style="text-align: left;"><code>src/python/model.py</code></td>
+<td style="text-align: left;"><span class="math inline">\(31.0\text{M}\)</span> parameters (Unpadded U-Net)</td>
+<td style="text-align: left;">From-scratch encoder-decoder with <code>_center_crop</code> skips</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;"><strong>3. Training &amp; Validation</strong></td>
+<td style="text-align: left;"><code>src/python/train.py</code>, <code>evaluate.py</code></td>
+<td style="text-align: left;"><strong>Dice: <span class="math inline">\(0.9475\)</span></strong> | <strong>IoU: <span class="math inline">\(0.9050\)</span></strong> | <strong>Acc: <span class="math inline">\(0.9660\)</span></strong></td>
+<td style="text-align: left;">Converged in 2 epochs via Combined BCE + Soft Dice Loss</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;"><strong>4. Graph Serialization</strong></td>
+<td style="text-align: left;"><code>src/python/export_onnx.py</code></td>
+<td style="text-align: left;"><strong>Max Abs Diff: <span class="math inline">\(2.42 \times 10^{-6}\)</span></strong></td>
+<td style="text-align: left;">Static <code>[1, 3, 416, 416]</code> graph with BatchNorm folding</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;"><strong>5. C++ Engine</strong></td>
+<td style="text-align: left;"><code>src/cpp/inference_app</code></td>
+<td style="text-align: left;">Zero-copy NCHW tensor binding</td>
+<td style="text-align: left;">Logit-threshold optimization (<span class="math inline">\(\sigma(z)&gt;0.5 \iff z&gt;0\)</span>)</td>
+</tr>
+</tbody>
+</table>
+<hr>
+</section>
+</section>
+<section id="how-the-c-inference-engine-works-with-onnx-runtime" class="level2" data-number="2">
+<h2 data-number="2" class="anchored" data-anchor-id="how-the-c-inference-engine-works-with-onnx-runtime"><span class="header-section-number">2</span> How the C++ Inference Engine Works with ONNX Runtime</h2>
+<p>Bridging a model from Python to C++ requires coordinating graph optimizations, memory layouts, and mathematical postprocessing.</p>
+<section id="static-onnx-graph-constant-folding" class="level3" data-number="2.1">
+<h3 data-number="2.1" class="anchored" data-anchor-id="static-onnx-graph-constant-folding"><span class="header-section-number">2.1</span> 1. Static ONNX Graph &amp; Constant Folding</h3>
+<p>When <code>export_onnx.py</code> exports <code>best_model.pth</code> in <code>model.eval()</code> mode with <code>do_constant_folding=True</code>, the exporter performs an algebraic graph transformation. In training, each <code>DoubleConv</code> block runs a <code>Conv2d</code> layer followed by <code>BatchNorm2d</code>:</p>
+<p><span class="math display">\[y = \gamma \left( \frac{\mathbf{W} * x - \mu}{\sqrt{\sigma^2 + \epsilon}} \right) + \beta\]</span></p>
+<p>At inference time, the running mean <span class="math inline">\(\mu\)</span>, running variance <span class="math inline">\(\sigma^2\)</span>, scale <span class="math inline">\(\gamma\)</span>, and shift <span class="math inline">\(\beta\)</span> are fixed constants. ONNX folds them directly into the convolution kernel weights <span class="math inline">\(\mathbf{W}_{\text{fused}}\)</span> and bias <span class="math inline">\(b_{\text{fused}}\)</span>:</p>
+<p><span class="math display">\[\mathbf{W}_{\text{fused}} = \frac{\gamma}{\sqrt{\sigma^2 + \epsilon}} \mathbf{W}, \quad b_{\text{fused}} = \beta - \frac{\gamma \, \mu}{\sqrt{\sigma^2 + \epsilon}}\]</span></p>
+<p>When <code>Ort::Session</code> loads <code>model.onnx</code> in C++ with <code>GraphOptimizationLevel::ORT_ENABLE_ALL</code>, all <code>BatchNorm2d</code> nodes are eliminated, cutting memory bandwidth and accelerating inference. Numerical verification confirmed a maximum absolute difference of only <strong><span class="math inline">\(2.42 \times 10^{-6}\)</span></strong> between PyTorch and ONNX Runtime across all <span class="math inline">\(228 \times 228\)</span> output logits.</p>
+</section>
+<section id="memory-layout-transformation-interleaved-textbgr_texthwc-to-planar-textrgb_textnchw" class="level3" data-number="2.2">
+<h3 data-number="2.2" class="anchored" data-anchor-id="memory-layout-transformation-interleaved-textbgr_texthwc-to-planar-textrgb_textnchw"><span class="header-section-number">2.2</span> 2. Memory Layout Transformation: Interleaved <span class="math inline">\(\text{BGR}_{\text{HWC}} \to\)</span> Planar <span class="math inline">\(\text{RGB}_{\text{NCHW}}\)</span></h3>
+<p>OpenCV and ONNX Runtime use fundamentally different memory layouts:</p>
+<ul>
+<li><strong>OpenCV (<code>cv::Mat</code>)</strong> loads images in <strong>BGR</strong> channel order with <strong>interleaved pixels</strong> (<span class="math inline">\(\text{HWC}\)</span>): <span class="math display">\[\text{Memory Address: } [B_{0,0}, G_{0,0}, R_{0,0}, \; B_{0,1}, G_{0,1}, R_{0,1}, \dots]\]</span></li>
+<li><strong>ONNX Runtime (<code>input</code> tensor)</strong> expects <strong>RGB</strong> channel order stored in <strong>contiguous planar blocks</strong> (<span class="math inline">\(\text{NCHW}\)</span>): <span class="math display">\[\text{Memory Address: } [\underbrace{R_{0,0}, R_{0,1}, \dots}_{\text{Plane 0 }(416\times 416)}, \; \underbrace{G_{0,0}, G_{0,1}, \dots}_{\text{Plane 1 }(416\times 416)}, \; \underbrace{B_{0,0}, B_{0,1}, \dots}_{\text{Plane 2 }(416\times 416)}]\]</span></li>
+</ul>
+<p>In <code>SegmentationEngine::preprocess()</code>, we resize the input image to <span class="math inline">\(416 \times 416\)</span>, convert <span class="math inline">\(\text{BGR} \to \text{RGB}\)</span>, scale intensities to <span class="math inline">\([0.0, 1.0]\)</span>, and use three pointer offsets (<code>r_plane</code>, <code>g_plane</code>, <code>b_plane</code> separated by <span class="math inline">\(H \times W = 173,056\)</span> floats) to transpose and apply ImageNet normalization in a single loop.</p>
+</section>
+<section id="zero-copy-tensor-binding" class="level3" data-number="2.3">
+<h3 data-number="2.3" class="anchored" data-anchor-id="zero-copy-tensor-binding"><span class="header-section-number">2.3</span> 3. Zero-Copy Tensor Binding</h3>
+<p>Rather than copying the preprocessed <code>std::vector&lt;float&gt;</code> into a separate runtime buffer, <code>SegmentationEngine::predict()</code> binds the vector’s underlying heap pointer (<code>input_data.data()</code>) directly into an <code>Ort::Value</code> tensor:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb1"><pre class="sourceCode cpp code-with-copy"><code class="sourceCode cpp"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a>Ort<span class="op">::</span>MemoryInfo memory_info <span class="op">=</span> Ort<span class="op">::</span>MemoryInfo<span class="op">::</span>CreateCpu<span class="op">(</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a>    OrtArenaAllocator<span class="op">,</span> OrtMemTypeDefault</span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="op">);</span></span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a>Ort<span class="op">::</span>Value input_tensor <span class="op">=</span> Ort<span class="op">::</span>Value<span class="op">::</span>CreateTensor<span class="op">&lt;</span><span class="dt">float</span><span class="op">&gt;(</span></span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a>    memory_info<span class="op">,</span></span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a>    input_data<span class="op">.</span>data<span class="op">(),</span></span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a>    input_data<span class="op">.</span>size<span class="op">(),</span></span>
+<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a>    input_shape<span class="op">.</span>data<span class="op">(),</span></span>
+<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a>    input_shape<span class="op">.</span>size<span class="op">()</span></span>
+<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a><span class="op">);</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</section>
+<section id="mathematical-postprocessing-shortcut-eliminating-51984-stdexp-calls" class="level3" data-number="2.4">
+<h3 data-number="2.4" class="anchored" data-anchor-id="mathematical-postprocessing-shortcut-eliminating-51984-stdexp-calls"><span class="header-section-number">2.4</span> 4. Mathematical Postprocessing Shortcut: Eliminating <span class="math inline">\(51,984\)</span> <code>std::exp()</code> Calls</h3>
+<p>To convert the raw output logits <span class="math inline">\(z \in (-\infty, \infty)\)</span> of shape <span class="math inline">\([1, 1, 228, 228]\)</span> into a binary mask at probability threshold <span class="math inline">\(p \in (0, 1)\)</span>, naive implementations evaluate the logistic sigmoid at every pixel:</p>
+<p><span class="math display">\[\sigma(z) = \frac{1}{1 + e^{-z}} &gt; p\]</span></p>
+<p>Evaluating <code>std::exp(-z)</code> across <span class="math inline">\(228 \times 228 = 51,984\)</span> pixels adds unnecessary CPU overhead. Because <span class="math inline">\(\sigma(z)\)</span> is strictly monotonically increasing on <span class="math inline">\(\mathbb{R}\)</span>, we invert the inequality analytically once prior to the loop:</p>
+<p><span class="math display">\[\frac{1}{1 + e^{-z}} &gt; p \iff z &gt; \ln\!\left(\frac{p}{1 - p}\right)\]</span></p>
+<p>For our standard threshold <span class="math inline">\(p = 0.5\)</span>, <span class="math inline">\(\ln(0.5 / 0.5) = \ln(1) = 0.0\text{f}\)</span>. Thus, checking <code>z &gt; 0.0f</code> produces the <strong>exact same binary mask</strong> using a single floating-point comparison instruction (<code>ucomiss</code>) per pixel.</p>
+<hr>
+</section>
+</section>
+<section id="running-c-in-quarto-xeus-cling-vs.-compiled-binary-integration" class="level2" data-number="3">
+<h2 data-number="3" class="anchored" data-anchor-id="running-c-in-quarto-xeus-cling-vs.-compiled-binary-integration"><span class="header-section-number">3</span> Running C++ in Quarto: <code>xeus-cling</code> vs.&nbsp;Compiled Binary Integration</h2>
+<p>Quarto supports two ways to showcase C++ inference results:</p>
+<section id="approach-a-interactive-c-cells-via-xeus-cling" class="level3" data-number="3.1">
+<h3 data-number="3.1" class="anchored" data-anchor-id="approach-a-interactive-c-cells-via-xeus-cling"><span class="header-section-number">3.1</span> Approach A: Interactive C++ Cells via <code>xeus-cling</code></h3>
+<p>If you have the <code>xeus-cling</code> Jupyter kernel installed (<code>conda install -c conda-forge xeus-cling</code>), Quarto can execute C++17 code cells interactively by setting <code>jupyter: xcpp17</code> in the YAML header and using <code>#pragma cling</code> directives to link libraries dynamically:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb2"><pre class="sourceCode cpp code-with-copy"><code class="sourceCode cpp"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="co">// Example xeus-cling interactive cell (requires jupyter: xcpp17 kernel)</span></span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a><span class="pp">#pragma cling add_include_path("/usr/include/onnxruntime")</span></span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a><span class="pp">#pragma cling add_include_path("/usr/include/opencv4")</span></span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a><span class="pp">#pragma cling add_include_path("../src/cpp/include")</span></span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a><span class="pp">#pragma cling load("libonnxruntime.so")</span></span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a><span class="pp">#pragma cling load("libopencv_core.so")</span></span>
+<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a><span class="pp">#pragma cling load("libopencv_imgproc.so")</span></span>
+<span id="cb2-8"><a href="#cb2-8" aria-hidden="true" tabindex="-1"></a><span class="pp">#pragma cling load("libopencv_imgcodecs.so")</span></span>
+<span id="cb2-9"><a href="#cb2-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-10"><a href="#cb2-10" aria-hidden="true" tabindex="-1"></a><span class="pp">#include </span><span class="im">"inference_engine.hpp"</span></span>
+<span id="cb2-11"><a href="#cb2-11" aria-hidden="true" tabindex="-1"></a><span class="pp">#include </span><span class="im">"../src/cpp/src/inference_engine.cpp"</span></span>
+<span id="cb2-12"><a href="#cb2-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-13"><a href="#cb2-13" aria-hidden="true" tabindex="-1"></a>cv<span class="op">::</span>Mat img <span class="op">=</span> cv<span class="op">::</span>imread<span class="op">(</span><span class="st">"../data/test/original/sample.jpg"</span><span class="op">);</span></span>
+<span id="cb2-14"><a href="#cb2-14" aria-hidden="true" tabindex="-1"></a>bcsd<span class="op">::</span>SegmentationEngine engine<span class="op">(</span><span class="st">"../outputs/model.onnx"</span><span class="op">,</span> <span class="dv">4</span><span class="op">);</span></span>
+<span id="cb2-15"><a href="#cb2-15" aria-hidden="true" tabindex="-1"></a><span class="kw">auto</span> res <span class="op">=</span> engine<span class="op">.</span>predict<span class="op">(</span>img<span class="op">,</span> <span class="fl">0.5</span><span class="bu">f</span><span class="op">);</span></span>
+<span id="cb2-16"><a href="#cb2-16" aria-hidden="true" tabindex="-1"></a><span class="bu">std::</span>cout <span class="op">&lt;&lt;</span> <span class="st">"Inference latency: "</span> <span class="op">&lt;&lt;</span> res<span class="op">.</span>inference_ms <span class="op">&lt;&lt;</span> <span class="st">" ms</span><span class="sc">\n</span><span class="st">"</span><span class="op">;</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</section>
+<section id="approach-b-invoking-the-compiled-c-binary-visualizing-outputs-recommended" class="level3" data-number="3.2">
+<h3 data-number="3.2" class="anchored" data-anchor-id="approach-b-invoking-the-compiled-c-binary-visualizing-outputs-recommended"><span class="header-section-number">3.2</span> Approach B: Invoking the Compiled C++ Binary &amp; Visualizing Outputs (Recommended)</h3>
+<p>Because <code>xeus-cling</code> uses an interpreted LLVM Cling JIT without full <code>-O3</code> CMake link-time optimizations, running your compiled <code>./src/cpp/build/inference_app</code> binary directly from Quarto (or loading its saved output images) gives true production latency measurements and works seamlessly with your standard Python Quarto kernel.</p>
+<div id="run-cpp-and-compare" class="cell" data-execution_count="1">
+<details open="" class="code-fold">
+<summary>Code</summary>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb3"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> subprocess</span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> pathlib <span class="im">import</span> Path</span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> numpy <span class="im">as</span> np</span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> matplotlib.pyplot <span class="im">as</span> plt</span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> PIL <span class="im">import</span> Image</span>
+<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-7"><a href="#cb3-7" aria-hidden="true" tabindex="-1"></a><span class="co"># Resolve project root</span></span>
+<span id="cb3-8"><a href="#cb3-8" aria-hidden="true" tabindex="-1"></a>cwd <span class="op">=</span> Path.cwd()</span>
+<span id="cb3-9"><a href="#cb3-9" aria-hidden="true" tabindex="-1"></a>project_root <span class="op">=</span> cwd <span class="cf">if</span> (cwd <span class="op">/</span> <span class="st">"data"</span>).exists() <span class="cf">else</span> cwd.parent</span>
+<span id="cb3-10"><a href="#cb3-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-11"><a href="#cb3-11" aria-hidden="true" tabindex="-1"></a>cpp_binary <span class="op">=</span> project_root <span class="op">/</span> <span class="st">"src"</span> <span class="op">/</span> <span class="st">"cpp"</span> <span class="op">/</span> <span class="st">"build"</span> <span class="op">/</span> <span class="st">"inference_app"</span></span>
+<span id="cb3-12"><a href="#cb3-12" aria-hidden="true" tabindex="-1"></a>onnx_model <span class="op">=</span> project_root <span class="op">/</span> <span class="st">"outputs"</span> <span class="op">/</span> <span class="st">"model.onnx"</span></span>
+<span id="cb3-13"><a href="#cb3-13" aria-hidden="true" tabindex="-1"></a>test_orig_dir <span class="op">=</span> project_root <span class="op">/</span> <span class="st">"data"</span> <span class="op">/</span> <span class="st">"test"</span> <span class="op">/</span> <span class="st">"original"</span></span>
+<span id="cb3-14"><a href="#cb3-14" aria-hidden="true" tabindex="-1"></a>test_mask_dir <span class="op">=</span> project_root <span class="op">/</span> <span class="st">"data"</span> <span class="op">/</span> <span class="st">"test"</span> <span class="op">/</span> <span class="st">"mask"</span></span>
+<span id="cb3-15"><a href="#cb3-15" aria-hidden="true" tabindex="-1"></a>output_dir <span class="op">=</span> project_root <span class="op">/</span> <span class="st">"outputs"</span></span>
+<span id="cb3-16"><a href="#cb3-16" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-17"><a href="#cb3-17" aria-hidden="true" tabindex="-1"></a><span class="co"># Select sample test images</span></span>
+<span id="cb3-18"><a href="#cb3-18" aria-hidden="true" tabindex="-1"></a>sample_images <span class="op">=</span> <span class="bu">sorted</span>(<span class="bu">list</span>(test_orig_dir.glob(<span class="st">"*.jpg"</span>)) <span class="op">+</span> <span class="bu">list</span>(test_orig_dir.glob(<span class="st">"*.png"</span>)))[:<span class="dv">3</span>]</span>
+<span id="cb3-19"><a href="#cb3-19" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-20"><a href="#cb3-20" aria-hidden="true" tabindex="-1"></a><span class="co"># Run the C++ inference binary on each sample if compiled</span></span>
+<span id="cb3-21"><a href="#cb3-21" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span> idx, img_path <span class="kw">in</span> <span class="bu">enumerate</span>(sample_images):</span>
+<span id="cb3-22"><a href="#cb3-22" aria-hidden="true" tabindex="-1"></a>    out_prefix <span class="op">=</span> output_dir <span class="op">/</span> <span class="ss">f"cpp_sample_</span><span class="sc">{</span>idx<span class="op">+</span><span class="dv">1</span><span class="sc">}</span><span class="ss">"</span></span>
+<span id="cb3-23"><a href="#cb3-23" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> cpp_binary.exists() <span class="kw">and</span> onnx_model.exists():</span>
+<span id="cb3-24"><a href="#cb3-24" aria-hidden="true" tabindex="-1"></a>        cmd <span class="op">=</span> [</span>
+<span id="cb3-25"><a href="#cb3-25" aria-hidden="true" tabindex="-1"></a>            <span class="bu">str</span>(cpp_binary),</span>
+<span id="cb3-26"><a href="#cb3-26" aria-hidden="true" tabindex="-1"></a>            <span class="st">"--model"</span>, <span class="bu">str</span>(onnx_model),</span>
+<span id="cb3-27"><a href="#cb3-27" aria-hidden="true" tabindex="-1"></a>            <span class="st">"--image"</span>, <span class="bu">str</span>(img_path),</span>
+<span id="cb3-28"><a href="#cb3-28" aria-hidden="true" tabindex="-1"></a>            <span class="st">"--output"</span>, <span class="bu">str</span>(out_prefix),</span>
+<span id="cb3-29"><a href="#cb3-29" aria-hidden="true" tabindex="-1"></a>        ]</span>
+<span id="cb3-30"><a href="#cb3-30" aria-hidden="true" tabindex="-1"></a>        res <span class="op">=</span> subprocess.run(cmd, capture_output<span class="op">=</span><span class="va">True</span>, text<span class="op">=</span><span class="va">True</span>, check<span class="op">=</span><span class="va">True</span>)</span>
+<span id="cb3-31"><a href="#cb3-31" aria-hidden="true" tabindex="-1"></a>        <span class="bu">print</span>(res.stdout)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</details>
+<div class="cell-output cell-output-stdout">
+<pre><code>Loading ONNX model from: /home/nazhanys/Documents/Work/bcsd/outputs/model.onnx
+--------------------------------------------------
+C++ ONNX Runtime Inference Complete!
+  Forward Pass Latency : 303.279 ms
+  Output Mask Size     : 228x228
+  Saved Binary Mask    : /home/nazhanys/Documents/Work/bcsd/outputs/cpp_sample_1_mask.png
+  Saved Contour Overlay: /home/nazhanys/Documents/Work/bcsd/outputs/cpp_sample_1_overlay.png
+--------------------------------------------------
+
+Loading ONNX model from: /home/nazhanys/Documents/Work/bcsd/outputs/model.onnx
+--------------------------------------------------
+C++ ONNX Runtime Inference Complete!
+  Forward Pass Latency : 306.868 ms
+  Output Mask Size     : 228x228
+  Saved Binary Mask    : /home/nazhanys/Documents/Work/bcsd/outputs/cpp_sample_2_mask.png
+  Saved Contour Overlay: /home/nazhanys/Documents/Work/bcsd/outputs/cpp_sample_2_overlay.png
+--------------------------------------------------
+
+Loading ONNX model from: /home/nazhanys/Documents/Work/bcsd/outputs/model.onnx
+--------------------------------------------------
+C++ ONNX Runtime Inference Complete!
+  Forward Pass Latency : 303.521 ms
+  Output Mask Size     : 228x228
+  Saved Binary Mask    : /home/nazhanys/Documents/Work/bcsd/outputs/cpp_sample_3_mask.png
+  Saved Contour Overlay: /home/nazhanys/Documents/Work/bcsd/outputs/cpp_sample_3_overlay.png
+--------------------------------------------------
+</code></pre>
+</div>
+</div>
+<hr>
+</section>
+</section>
+<section id="visual-comparison-input-blood-smear-vs.-c-inference-outputs" class="level2" data-number="4">
+<h2 data-number="4" class="anchored" data-anchor-id="visual-comparison-input-blood-smear-vs.-c-inference-outputs"><span class="header-section-number">4</span> Visual Comparison: Input Blood Smear vs.&nbsp;C++ Inference Outputs</h2>
+<p>The figure below compares the raw input blood smear image (<span class="math inline">\(416 \times 416\)</span> resized and center-cropped to the unpadded U-Net’s <span class="math inline">\(228 \times 228\)</span> receptive field), the ground-truth mask, the C++ engine’s binary mask (<code>_mask.png</code>), and the C++ engine’s OpenCV membrane contour overlay (<code>_overlay.png</code>).</p>
+<div id="cell-fig-cpp-comparison" class="cell" data-fig-height="11" data-fig-width="15" data-execution_count="2">
+<details open="" class="code-fold">
+<summary>Code</summary>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb5"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a>num_samples <span class="op">=</span> <span class="bu">len</span>(sample_images)</span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> num_samples <span class="op">&gt;</span> <span class="dv">0</span>:</span>
+<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a>    fig, axes <span class="op">=</span> plt.subplots(num_samples, <span class="dv">4</span>, figsize<span class="op">=</span>(<span class="dv">15</span>, <span class="fl">3.8</span> <span class="op">*</span> num_samples))</span>
+<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> num_samples <span class="op">==</span> <span class="dv">1</span>:</span>
+<span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a>        axes <span class="op">=</span> np.expand_dims(axes, axis<span class="op">=</span><span class="dv">0</span>)</span>
+<span id="cb5-6"><a href="#cb5-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-7"><a href="#cb5-7" aria-hidden="true" tabindex="-1"></a>    <span class="cf">for</span> idx, img_path <span class="kw">in</span> <span class="bu">enumerate</span>(sample_images):</span>
+<span id="cb5-8"><a href="#cb5-8" aria-hidden="true" tabindex="-1"></a>        stem <span class="op">=</span> img_path.stem</span>
+<span id="cb5-9"><a href="#cb5-9" aria-hidden="true" tabindex="-1"></a>        gt_path <span class="op">=</span> test_mask_dir <span class="op">/</span> <span class="ss">f"</span><span class="sc">{</span>stem<span class="sc">}</span><span class="ss">.png"</span></span>
+<span id="cb5-10"><a href="#cb5-10" aria-hidden="true" tabindex="-1"></a>        <span class="cf">if</span> <span class="kw">not</span> gt_path.exists():</span>
+<span id="cb5-11"><a href="#cb5-11" aria-hidden="true" tabindex="-1"></a>            gt_path <span class="op">=</span> test_mask_dir <span class="op">/</span> <span class="ss">f"</span><span class="sc">{</span>stem<span class="sc">}</span><span class="ss">.jpg"</span></span>
+<span id="cb5-12"><a href="#cb5-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-13"><a href="#cb5-13" aria-hidden="true" tabindex="-1"></a>        cpp_mask_path <span class="op">=</span> output_dir <span class="op">/</span> <span class="ss">f"cpp_sample_</span><span class="sc">{</span>idx<span class="op">+</span><span class="dv">1</span><span class="sc">}</span><span class="ss">_mask.png"</span></span>
+<span id="cb5-14"><a href="#cb5-14" aria-hidden="true" tabindex="-1"></a>        cpp_overlay_path <span class="op">=</span> output_dir <span class="op">/</span> <span class="ss">f"cpp_sample_</span><span class="sc">{</span>idx<span class="op">+</span><span class="dv">1</span><span class="sc">}</span><span class="ss">_overlay.png"</span></span>
+<span id="cb5-15"><a href="#cb5-15" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-16"><a href="#cb5-16" aria-hidden="true" tabindex="-1"></a>        <span class="co"># Load and center-crop original &amp; ground-truth to 228x228 for 1:1 visual alignment</span></span>
+<span id="cb5-17"><a href="#cb5-17" aria-hidden="true" tabindex="-1"></a>        orig_img <span class="op">=</span> Image.<span class="bu">open</span>(img_path).convert(<span class="st">"RGB"</span>).resize((<span class="dv">416</span>, <span class="dv">416</span>), Image.Resampling.BILINEAR)</span>
+<span id="cb5-18"><a href="#cb5-18" aria-hidden="true" tabindex="-1"></a>        gt_img <span class="op">=</span> Image.<span class="bu">open</span>(gt_path).convert(<span class="st">"L"</span>).resize((<span class="dv">416</span>, <span class="dv">416</span>), Image.Resampling.NEAREST)</span>
+<span id="cb5-19"><a href="#cb5-19" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-20"><a href="#cb5-20" aria-hidden="true" tabindex="-1"></a>        <span class="co"># Center crop 416 -&gt; 228 (box: left=94, upper=94, right=322, lower=322)</span></span>
+<span id="cb5-21"><a href="#cb5-21" aria-hidden="true" tabindex="-1"></a>        crop_box <span class="op">=</span> (<span class="dv">94</span>, <span class="dv">94</span>, <span class="dv">322</span>, <span class="dv">322</span>)</span>
+<span id="cb5-22"><a href="#cb5-22" aria-hidden="true" tabindex="-1"></a>        orig_crop <span class="op">=</span> orig_img.crop(crop_box)</span>
+<span id="cb5-23"><a href="#cb5-23" aria-hidden="true" tabindex="-1"></a>        gt_crop <span class="op">=</span> gt_img.crop(crop_box)</span>
+<span id="cb5-24"><a href="#cb5-24" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-25"><a href="#cb5-25" aria-hidden="true" tabindex="-1"></a>        axes[idx, <span class="dv">0</span>].imshow(orig_crop)</span>
+<span id="cb5-26"><a href="#cb5-26" aria-hidden="true" tabindex="-1"></a>        axes[idx, <span class="dv">0</span>].set_title(<span class="ss">f"Sample </span><span class="sc">{</span>idx<span class="op">+</span><span class="dv">1</span><span class="sc">}</span><span class="ss">: Input Smear (228×228)"</span>, fontsize<span class="op">=</span><span class="dv">11</span>, fontweight<span class="op">=</span><span class="st">"bold"</span>)</span>
+<span id="cb5-27"><a href="#cb5-27" aria-hidden="true" tabindex="-1"></a>        axes[idx, <span class="dv">0</span>].axis(<span class="st">"off"</span>)</span>
+<span id="cb5-28"><a href="#cb5-28" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-29"><a href="#cb5-29" aria-hidden="true" tabindex="-1"></a>        axes[idx, <span class="dv">1</span>].imshow(gt_crop, cmap<span class="op">=</span><span class="st">"gray"</span>)</span>
+<span id="cb5-30"><a href="#cb5-30" aria-hidden="true" tabindex="-1"></a>        axes[idx, <span class="dv">1</span>].set_title(<span class="st">"Ground Truth Mask"</span>, fontsize<span class="op">=</span><span class="dv">11</span>)</span>
+<span id="cb5-31"><a href="#cb5-31" aria-hidden="true" tabindex="-1"></a>        axes[idx, <span class="dv">1</span>].axis(<span class="st">"off"</span>)</span>
+<span id="cb5-32"><a href="#cb5-32" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-33"><a href="#cb5-33" aria-hidden="true" tabindex="-1"></a>        <span class="cf">if</span> cpp_mask_path.exists() <span class="kw">and</span> cpp_overlay_path.exists():</span>
+<span id="cb5-34"><a href="#cb5-34" aria-hidden="true" tabindex="-1"></a>            cpp_mask <span class="op">=</span> Image.<span class="bu">open</span>(cpp_mask_path).convert(<span class="st">"L"</span>)</span>
+<span id="cb5-35"><a href="#cb5-35" aria-hidden="true" tabindex="-1"></a>            cpp_overlay <span class="op">=</span> Image.<span class="bu">open</span>(cpp_overlay_path).convert(<span class="st">"RGB"</span>)</span>
+<span id="cb5-36"><a href="#cb5-36" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-37"><a href="#cb5-37" aria-hidden="true" tabindex="-1"></a>            axes[idx, <span class="dv">2</span>].imshow(cpp_mask, cmap<span class="op">=</span><span class="st">"gray"</span>)</span>
+<span id="cb5-38"><a href="#cb5-38" aria-hidden="true" tabindex="-1"></a>            axes[idx, <span class="dv">2</span>].set_title(<span class="st">"C++ ONNX Binary Mask"</span>, fontsize<span class="op">=</span><span class="dv">11</span>)</span>
+<span id="cb5-39"><a href="#cb5-39" aria-hidden="true" tabindex="-1"></a>            axes[idx, <span class="dv">2</span>].axis(<span class="st">"off"</span>)</span>
+<span id="cb5-40"><a href="#cb5-40" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-41"><a href="#cb5-41" aria-hidden="true" tabindex="-1"></a>            axes[idx, <span class="dv">3</span>].imshow(cpp_overlay)</span>
+<span id="cb5-42"><a href="#cb5-42" aria-hidden="true" tabindex="-1"></a>            axes[idx, <span class="dv">3</span>].set_title(<span class="st">"C++ OpenCV Contour Overlay"</span>, fontsize<span class="op">=</span><span class="dv">11</span>)</span>
+<span id="cb5-43"><a href="#cb5-43" aria-hidden="true" tabindex="-1"></a>            axes[idx, <span class="dv">3</span>].axis(<span class="st">"off"</span>)</span>
+<span id="cb5-44"><a href="#cb5-44" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-45"><a href="#cb5-45" aria-hidden="true" tabindex="-1"></a>    plt.tight_layout()</span>
+<span id="cb5-46"><a href="#cb5-46" aria-hidden="true" tabindex="-1"></a>    plt.show()</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</details>
+<div class="cell-output cell-output-display">
+<div id="fig-cpp-comparison" class="quarto-float quarto-figure quarto-figure-center anchored">
+<figure class="quarto-float quarto-float-fig figure">
+<div aria-describedby="fig-cpp-comparison-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
+<img src="cpp_inference_files/figure-html/fig-cpp-comparison-output-1.png" width="1419" height="1087" class="figure-img">
+</div>
+<figcaption class="quarto-float-caption-bottom quarto-float-caption quarto-float-fig" id="fig-cpp-comparison-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
+Figure&nbsp;1: End-to-End C++ Inference Verification: Input Blood Smear, Ground Truth Mask, C++ ONNX Binary Mask, and C++ OpenCV Membrane Contour Overlay.
+</figcaption>
+</figure>
+</div>
+</div>
+</div>
+<section id="static-reference-comparison" class="level3" data-number="4.1">
+<h3 data-number="4.1" class="anchored" data-anchor-id="static-reference-comparison"><span class="header-section-number">4.1</span> Static Reference Comparison</h3>
+<p>If rendering without executing the binary live, you can also embed the pre-rendered comparison figure directly in Markdown:</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="cpp_inference_comparison.png" class="img-fluid figure-img"></p>
+<figcaption>C++ ONNX Runtime Inference vs.&nbsp;Ground Truth Comparison</figcaption>
+</figure>
+</div>
+<hr>
+</section>
+</section>
+<section id="final-project-conclusions" class="level2" data-number="5">
+<h2 data-number="5" class="anchored" data-anchor-id="final-project-conclusions"><span class="header-section-number">5</span> Final Project Conclusions</h2>
+<section id="mathematical-architectural-takeaways" class="level3" data-number="5.1">
+<h3 data-number="5.1" class="anchored" data-anchor-id="mathematical-architectural-takeaways"><span class="header-section-number">5.1</span> 1. Mathematical &amp; Architectural Takeaways</h3>
+<ul>
+<li><strong>Unpadded U-Net &amp; Skip Cropping</strong>: Building the original 2015 unpadded U-Net (<code>padding=0</code>) from scratch demonstrated how <span class="math inline">\(3 \times 3\)</span> convolutions reduce spatial resolution by <span class="math inline">\(2\)</span> pixels per layer (<span class="math inline">\(416 \times 416 \to 228 \times 228\)</span>), requiring exact center-cropping (<code>_center_crop</code>) across all four skip connections and target masks.</li>
+<li><strong>Synergy of Combined BCE + Soft Dice Loss</strong>: Pairing <code>nn.BCEWithLogitsLoss</code> (using the log-sum-exp trick for floating-point stability) with differentiable Soft Dice Loss resolved foreground-to-background class imbalance, achieving a <strong><span class="math inline">\(94.75\%\)</span> Dice Score</strong> and <strong><span class="math inline">\(90.50\%\)</span> IoU</strong> within just 2 epochs.</li>
+<li><strong>Lossless Graph Portability</strong>: Exporting to ONNX with constant folding absorbed all <code>BatchNorm2d</code> layers into their preceding <code>Conv2d</code> weights, achieving a <span class="math inline">\(2.42 \times 10^{-6}\)</span> parity difference between Python and C++.</li>
+</ul>
+</section>
+<section id="systems-deployment-effectiveness" class="level3" data-number="5.2">
+<h3 data-number="5.2" class="anchored" data-anchor-id="systems-deployment-effectiveness"><span class="header-section-number">5.2</span> 2. Systems &amp; Deployment Effectiveness</h3>
+<ul>
+<li><strong>Eliminating Runtime Overhead</strong>: Moving inference to C++17 with ONNX Runtime and OpenCV removes the Python interpreter and Global Interpreter Lock (GIL), allowing deterministic memory allocation and direct pointer manipulation.</li>
+<li><strong>Algebraic Optimization in Production</strong>: Replacing <span class="math inline">\(51,984\)</span> per-pixel <code>std::exp()</code> evaluations with the monotonic logit equivalence (<span class="math inline">\(\sigma(z) &gt; 0.5 \iff z &gt; 0.0\text{f}\)</span>) illustrates how simple mathematical analysis directly reduces CPU cycle counts in postprocessing.</li>
+</ul>
+</section>
+<section id="future-extensions" class="level3" data-number="5.3">
+<h3 data-number="5.3" class="anchored" data-anchor-id="future-extensions"><span class="header-section-number">5.3</span> 3. Future Extensions</h3>
+<ol type="1">
+<li><strong>Multi-Class Cell Differentiation</strong>: Expand <code>out_channels</code> from <span class="math inline">\(1 \to 4\)</span> (Background, RBC, WBC, Platelets) using <code>nn.CrossEntropyLoss</code> + Generalized Multi-Class Dice Loss.</li>
+<li><strong>INT8 / FP16 Quantization</strong>: Apply ONNX Runtime Post-Training Quantization (PTQ) to compress <code>model.onnx</code> weights from 32-bit floats to 8-bit integers, reducing model size by <span class="math inline">\(4\times\)</span> and accelerating CPU/edge inference.</li>
+<li><strong>Overlap-Tile Full-Slide Inference</strong>: Implement Ronneberger’s mirror-padded overlap-tile stitching in <code>src/cpp/</code> to segment arbitrary gigapixel whole-slide microscopy images seamlessly.</li>
+</ol>
+
+</section>
+</section>
+
+</main>
+<!-- /main column -->
+<script id="quarto-html-after-body" type="application/javascript">
+  window.document.addEventListener("DOMContentLoaded", function (event) {
+    const icon = "";
+    const anchorJS = new window.AnchorJS();
+    anchorJS.options = {
+      placement: 'right',
+      icon: icon
+    };
+    anchorJS.add('.anchored');
+    const isCodeAnnotation = (el) => {
+      for (const clz of el.classList) {
+        if (clz.startsWith('code-annotation-')) {                     
+          return true;
+        }
+      }
+      return false;
+    }
+    const onCopySuccess = function(e) {
+      // button target
+      const button = e.trigger;
+      // don't keep focus
+      button.blur();
+      // flash "checked"
+      button.classList.add('code-copy-button-checked');
+      var currentTitle = button.getAttribute("title");
+      button.setAttribute("title", "Copied!");
+      let tooltip;
+      if (window.bootstrap) {
+        button.setAttribute("data-bs-toggle", "tooltip");
+        button.setAttribute("data-bs-placement", "left");
+        button.setAttribute("data-bs-title", "Copied!");
+        tooltip = new bootstrap.Tooltip(button, 
+          { trigger: "manual", 
+            customClass: "code-copy-button-tooltip",
+            offset: [0, -8]});
+        tooltip.show();    
+      }
+      setTimeout(function() {
+        if (tooltip) {
+          tooltip.hide();
+          button.removeAttribute("data-bs-title");
+          button.removeAttribute("data-bs-toggle");
+          button.removeAttribute("data-bs-placement");
+        }
+        button.setAttribute("title", currentTitle);
+        button.classList.remove('code-copy-button-checked');
+      }, 1000);
+      // clear code selection
+      e.clearSelection();
+    }
+    const getTextToCopy = function(trigger) {
+      const outerScaffold = trigger.parentElement.cloneNode(true);
+      const codeEl = outerScaffold.querySelector('code');
+      for (const childEl of codeEl.children) {
+        if (isCodeAnnotation(childEl)) {
+          childEl.remove();
+        }
+      }
+      return codeEl.innerText;
+    }
+    const clipboard = new window.ClipboardJS('.code-copy-button:not([data-in-quarto-modal])', {
+      text: getTextToCopy
+    });
+    clipboard.on('success', onCopySuccess);
+    if (window.document.getElementById('quarto-embedded-source-code-modal')) {
+      const clipboardModal = new window.ClipboardJS('.code-copy-button[data-in-quarto-modal]', {
+        text: getTextToCopy,
+        container: window.document.getElementById('quarto-embedded-source-code-modal')
+      });
+      clipboardModal.on('success', onCopySuccess);
+    }
+      var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
+      var mailtoRegex = new RegExp(/^mailto:/);
+        var filterRegex = new RegExp('/' + window.location.host + '/');
+      var isInternal = (href) => {
+          return filterRegex.test(href) || localhostRegex.test(href) || mailtoRegex.test(href);
+      }
+      // Inspect non-navigation links and adorn them if external
+     var links = window.document.querySelectorAll('a[href]:not(.nav-link):not(.navbar-brand):not(.toc-action):not(.sidebar-link):not(.sidebar-item-toggle):not(.pagination-link):not(.no-external):not([aria-hidden]):not(.dropdown-item):not(.quarto-navigation-tool):not(.about-link)');
+      for (var i=0; i<links.length; i++) {
+        const link = links[i];
+        if (!isInternal(link.href)) {
+          // undo the damage that might have been done by quarto-nav.js in the case of
+          // links that we want to consider external
+          if (link.dataset.originalHref !== undefined) {
+            link.href = link.dataset.originalHref;
+          }
+        }
+      }
+    function tippyHover(el, contentFn, onTriggerFn, onUntriggerFn) {
+      const config = {
+        allowHTML: true,
+        maxWidth: 500,
+        delay: 100,
+        arrow: false,
+        appendTo: function(el) {
+            return el.parentElement;
+        },
+        interactive: true,
+        interactiveBorder: 10,
+        theme: 'quarto',
+        placement: 'bottom-start',
+      };
+      if (contentFn) {
+        config.content = contentFn;
+      }
+      if (onTriggerFn) {
+        config.onTrigger = onTriggerFn;
+      }
+      if (onUntriggerFn) {
+        config.onUntrigger = onUntriggerFn;
+      }
+      window.tippy(el, config); 
+    }
+    const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+    for (var i=0; i<noterefs.length; i++) {
+      const ref = noterefs[i];
+      tippyHover(ref, function() {
+        // use id or data attribute instead here
+        let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
+        try { href = new URL(href).hash; } catch {}
+        const id = href.replace(/^#\/?/, "");
+        const note = window.document.getElementById(id);
+        if (note) {
+          return note.innerHTML;
+        } else {
+          return "";
+        }
+      });
+    }
+    const xrefs = window.document.querySelectorAll('a.quarto-xref');
+    const processXRef = (id, note) => {
+      // Strip column container classes
+      const stripColumnClz = (el) => {
+        el.classList.remove("page-full", "page-columns");
+        if (el.children) {
+          for (const child of el.children) {
+            stripColumnClz(child);
+          }
+        }
+      }
+      stripColumnClz(note)
+      if (id === null || id.startsWith('sec-')) {
+        // Special case sections, only their first couple elements
+        const container = document.createElement("div");
+        if (note.children && note.children.length > 2) {
+          container.appendChild(note.children[0].cloneNode(true));
+          for (let i = 1; i < note.children.length; i++) {
+            const child = note.children[i];
+            if (child.tagName === "P" && child.innerText === "") {
+              continue;
+            } else {
+              container.appendChild(child.cloneNode(true));
+              break;
+            }
+          }
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(container);
+          }
+          return container.innerHTML
+        } else {
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(note);
+          }
+          return note.innerHTML;
+        }
+      } else {
+        // Remove any anchor links if they are present
+        const anchorLink = note.querySelector('a.anchorjs-link');
+        if (anchorLink) {
+          anchorLink.remove();
+        }
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(note);
+        }
+        if (note.classList.contains("callout")) {
+          return note.outerHTML;
+        } else {
+          return note.innerHTML;
+        }
+      }
+    }
+    for (var i=0; i<xrefs.length; i++) {
+      const xref = xrefs[i];
+      tippyHover(xref, undefined, function(instance) {
+        instance.disable();
+        let url = xref.getAttribute('href');
+        let hash = undefined; 
+        if (url.startsWith('#')) {
+          hash = url;
+        } else {
+          try { hash = new URL(url).hash; } catch {}
+        }
+        if (hash) {
+          const id = hash.replace(/^#\/?/, "");
+          const note = window.document.getElementById(id);
+          if (note !== null) {
+            try {
+              const html = processXRef(id, note.cloneNode(true));
+              instance.setContent(html);
+            } finally {
+              instance.enable();
+              instance.show();
+            }
+          } else {
+            // See if we can fetch this
+            fetch(url.split('#')[0])
+            .then(res => res.text())
+            .then(html => {
+              const parser = new DOMParser();
+              const htmlDoc = parser.parseFromString(html, "text/html");
+              const note = htmlDoc.getElementById(id);
+              if (note !== null) {
+                const html = processXRef(id, note);
+                instance.setContent(html);
+              } 
+            }).finally(() => {
+              instance.enable();
+              instance.show();
+            });
+          }
+        } else {
+          // See if we can fetch a full url (with no hash to target)
+          // This is a special case and we should probably do some content thinning / targeting
+          fetch(url)
+          .then(res => res.text())
+          .then(html => {
+            const parser = new DOMParser();
+            const htmlDoc = parser.parseFromString(html, "text/html");
+            const note = htmlDoc.querySelector('main.content');
+            if (note !== null) {
+              // This should only happen for chapter cross references
+              // (since there is no id in the URL)
+              // remove the first header
+              if (note.children.length > 0 && note.children[0].tagName === "HEADER") {
+                note.children[0].remove();
+              }
+              const html = processXRef(null, note);
+              instance.setContent(html);
+            } 
+          }).finally(() => {
+            instance.enable();
+            instance.show();
+          });
+        }
+      }, function(instance) {
+      });
+    }
+        let selectedAnnoteEl;
+        const selectorForAnnotation = ( cell, annotation) => {
+          let cellAttr = 'data-code-cell="' + cell + '"';
+          let lineAttr = 'data-code-annotation="' +  annotation + '"';
+          const selector = 'span[' + cellAttr + '][' + lineAttr + ']';
+          return selector;
+        }
+        const selectCodeLines = (annoteEl) => {
+          const doc = window.document;
+          const targetCell = annoteEl.getAttribute("data-target-cell");
+          const targetAnnotation = annoteEl.getAttribute("data-target-annotation");
+          const annoteSpan = window.document.querySelector(selectorForAnnotation(targetCell, targetAnnotation));
+          const lines = annoteSpan.getAttribute("data-code-lines").split(",");
+          const lineIds = lines.map((line) => {
+            return targetCell + "-" + line;
+          })
+          let top = null;
+          let height = null;
+          let parent = null;
+          if (lineIds.length > 0) {
+              //compute the position of the single el (top and bottom and make a div)
+              const el = window.document.getElementById(lineIds[0]);
+              top = el.offsetTop;
+              height = el.offsetHeight;
+              parent = el.parentElement.parentElement;
+            if (lineIds.length > 1) {
+              const lastEl = window.document.getElementById(lineIds[lineIds.length - 1]);
+              const bottom = lastEl.offsetTop + lastEl.offsetHeight;
+              height = bottom - top;
+            }
+            if (top !== null && height !== null && parent !== null) {
+              // cook up a div (if necessary) and position it 
+              let div = window.document.getElementById("code-annotation-line-highlight");
+              if (div === null) {
+                div = window.document.createElement("div");
+                div.setAttribute("id", "code-annotation-line-highlight");
+                div.style.position = 'absolute';
+                parent.appendChild(div);
+              }
+              div.style.top = top - 2 + "px";
+              div.style.height = height + 4 + "px";
+              div.style.left = 0;
+              let gutterDiv = window.document.getElementById("code-annotation-line-highlight-gutter");
+              if (gutterDiv === null) {
+                gutterDiv = window.document.createElement("div");
+                gutterDiv.setAttribute("id", "code-annotation-line-highlight-gutter");
+                gutterDiv.style.position = 'absolute';
+                const codeCell = window.document.getElementById(targetCell);
+                const gutter = codeCell.querySelector('.code-annotation-gutter');
+                gutter.appendChild(gutterDiv);
+              }
+              gutterDiv.style.top = top - 2 + "px";
+              gutterDiv.style.height = height + 4 + "px";
+            }
+            selectedAnnoteEl = annoteEl;
+          }
+        };
+        const unselectCodeLines = () => {
+          const elementsIds = ["code-annotation-line-highlight", "code-annotation-line-highlight-gutter"];
+          elementsIds.forEach((elId) => {
+            const div = window.document.getElementById(elId);
+            if (div) {
+              div.remove();
+            }
+          });
+          selectedAnnoteEl = undefined;
+        };
+          // Handle positioning of the toggle
+      window.addEventListener(
+        "resize",
+        throttle(() => {
+          elRect = undefined;
+          if (selectedAnnoteEl) {
+            selectCodeLines(selectedAnnoteEl);
+          }
+        }, 10)
+      );
+      function throttle(fn, ms) {
+      let throttle = false;
+      let timer;
+        return (...args) => {
+          if(!throttle) { // first call gets through
+              fn.apply(this, args);
+              throttle = true;
+          } else { // all the others get throttled
+              if(timer) clearTimeout(timer); // cancel #2
+              timer = setTimeout(() => {
+                fn.apply(this, args);
+                timer = throttle = false;
+              }, ms);
+          }
+        };
+      }
+        // Attach click handler to the DT
+        const annoteDls = window.document.querySelectorAll('dt[data-target-cell]');
+        for (const annoteDlNode of annoteDls) {
+          annoteDlNode.addEventListener('click', (event) => {
+            const clickedEl = event.target;
+            if (clickedEl !== selectedAnnoteEl) {
+              unselectCodeLines();
+              const activeEl = window.document.querySelector('dt[data-target-cell].code-annotation-active');
+              if (activeEl) {
+                activeEl.classList.remove('code-annotation-active');
+              }
+              selectCodeLines(clickedEl);
+              clickedEl.classList.add('code-annotation-active');
+            } else {
+              // Unselect the line
+              unselectCodeLines();
+              clickedEl.classList.remove('code-annotation-active');
+            }
+          });
+        }
+    const findCites = (el) => {
+      const parentEl = el.parentElement;
+      if (parentEl) {
+        const cites = parentEl.dataset.cites;
+        if (cites) {
+          return {
+            el,
+            cites: cites.split(' ')
+          };
+        } else {
+          return findCites(el.parentElement)
+        }
+      } else {
+        return undefined;
+      }
+    };
+    var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+    for (var i=0; i<bibliorefs.length; i++) {
+      const ref = bibliorefs[i];
+      const citeInfo = findCites(ref);
+      if (citeInfo) {
+        tippyHover(citeInfo.el, function() {
+          var popup = window.document.createElement('div');
+          citeInfo.cites.forEach(function(cite) {
+            var citeDiv = window.document.createElement('div');
+            citeDiv.classList.add('hanging-indent');
+            citeDiv.classList.add('csl-entry');
+            var biblioDiv = window.document.getElementById('ref-' + cite);
+            if (biblioDiv) {
+              citeDiv.innerHTML = biblioDiv.innerHTML;
+            }
+            popup.appendChild(citeDiv);
+          });
+          return popup.innerHTML;
+        });
+      }
+    }
+  });
+  </script>
+</div> <!-- /content -->
+
+
+
+
+</body></html>

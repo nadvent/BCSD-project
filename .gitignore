@@ -77,7 +77,6 @@ data/test/mask/*
 .ipynb_checkpoints/
 .quarto/
 *_files/
-*.html
 
 # ==========================================
 # C++ / CMake Build Artifacts
