@@ -15,30 +15,44 @@ SegmentationEngine::SegmentationEngine(const std::string &model_path,
 
   session_ = std::make_unique<Ort::Session>(env_, model_path.c_str(),
                                             session_options_);
+
+  // Query input tensor dimensions if specified in ONNX metadata
+  try {
+    Ort::TypeInfo type_info = session_->GetInputTypeInfo(0);
+    auto tensor_info = type_info.GetTensorTypeAndShapeInfo();
+    std::vector<int64_t> in_shape = tensor_info.GetShape();
+    // Expected format: [batch, channels, height, width]
+    if (in_shape.size() == 4) {
+      if (in_shape[2] > 0) {
+        input_height_ = static_cast<int>(in_shape[2]);
+      }
+      if (in_shape[3] > 0) {
+        input_width_ = static_cast<int>(in_shape[3]);
+      }
+    }
+  } catch (...) {
+    // Retain default static dimensions (416x416) on query failure
+  }
 }
 
 std::vector<float>
-SegmentationEngine::preprocess(const cv::Mat &bgr_image) const {
-  if (bgr_image.empty()) {
+SegmentationEngine::preprocess(const cv::Mat &resized_bgr) const {
+  if (resized_bgr.empty()) {
     throw std::invalid_argument("Input BGR image is empty.");
   }
+  if (resized_bgr.rows != input_height_ || resized_bgr.cols != input_width_) {
+    throw std::invalid_argument("Input image dimensions do not match model expectation.");
+  }
 
-  // 1. Resize to static model input dimensions (416x416) using bilinear
-  // interpolation
-  cv::Mat resized_bgr;
-  cv::resize(bgr_image, resized_bgr, cv::Size(input_width_, input_height_), 0.0,
-             0.0, cv::INTER_LINEAR);
-
-  // 2. Convert OpenCV BGR -> RGB to match PyTorch PIL training pipeline
+  // 1. Convert OpenCV BGR -> RGB to match PyTorch training pipeline
   cv::Mat resized_rgb;
   cv::cvtColor(resized_bgr, resized_rgb, cv::COLOR_BGR2RGB);
 
-  // 3. Scale uint8 [0, 255] -> float32 [0.0, 1.0]
+  // 2. Scale uint8 [0, 255] -> float32 [0.0, 1.0]
   cv::Mat float_rgb;
   resized_rgb.convertTo(float_rgb, CV_32FC3, 1.0 / 255.0);
 
-  // 4. HWC (Interleaved) -> NCHW (Planar) transposition + ImageNet
-  // Normalization
+  // 3. HWC (Interleaved) -> NCHW (Planar) transposition + ImageNet Normalization
   const int hw = input_height_ * input_width_;
   std::vector<float> input_tensor(3 * hw);
 
@@ -81,8 +95,8 @@ void SegmentationEngine::postprocess(const float *logits, int out_h, int out_w,
     }
   }
 
-  // Center-crop the 416x416 BGR image to match the output resolution (228x228
-  // for unpadded U-Net)
+  // Center-crop the resized BGR image to match the output resolution
+  // (e.g. 228x228 for unpadded U-Net, or 416x416 for padded U-Net)
   const int diff_y = (resized_bgr.rows - out_h) / 2;
   const int diff_x = (resized_bgr.cols - out_w) / 2;
   cv::Rect center_roi(diff_x, diff_y, out_w, out_h);
@@ -98,12 +112,24 @@ void SegmentationEngine::postprocess(const float *logits, int out_h, int out_w,
 
 SegmentationResult SegmentationEngine::predict(const cv::Mat &bgr_image,
                                                float prob_threshold) {
-  // Keep a 416x416 BGR copy for overlay rendering
-  cv::Mat resized_bgr;
-  cv::resize(bgr_image, resized_bgr, cv::Size(input_width_, input_height_), 0.0,
-             0.0, cv::INTER_LINEAR);
+  if (bgr_image.empty()) {
+    throw std::invalid_argument("Input BGR image is empty.");
+  }
+  if (prob_threshold <= 0.0f || prob_threshold >= 1.0f) {
+    throw std::invalid_argument(
+        "Probability threshold must be strictly between 0.0 and 1.0.");
+  }
 
-  std::vector<float> input_data = preprocess(bgr_image);
+  // Resize input to model dimensions only once
+  cv::Mat resized_bgr;
+  if (bgr_image.rows == input_height_ && bgr_image.cols == input_width_) {
+    resized_bgr = bgr_image;
+  } else {
+    cv::resize(bgr_image, resized_bgr, cv::Size(input_width_, input_height_),
+               0.0, 0.0, cv::INTER_LINEAR);
+  }
+
+  std::vector<float> input_data = preprocess(resized_bgr);
   std::array<int64_t, 4> input_shape{1, 3, input_height_, input_width_};
 
   Ort::MemoryInfo memory_info =

@@ -12,16 +12,15 @@ namespace bcsd {
 
 struct SegmentationResult {
   cv::Mat binary_mask;     // CV_8UC1 (0 or 255) of size [out_h, out_w]
-  cv::Mat contour_overlay; // CV_8UC3 BGR image [out_h, out_w] with green/red
-                           // cell contours
+  cv::Mat contour_overlay; // CV_8UC3 BGR image [out_h, out_w] with red cell contours
   double inference_ms;     // Forward pass execution latency in milliseconds
 };
 
 class SegmentationEngine {
 public:
   /**
-   * @brief Initializes the ONNX Runtime environment and loads the static U-Net
-   * model.
+   * @brief Initializes the ONNX Runtime environment and loads the U-Net model.
+   * Inspects model input dimensions if specified in graph metadata.
    * @param model_path Path to serialized model.onnx file.
    * @param num_threads Number of intra-op CPU threads for ONNX Runtime.
    */
@@ -44,12 +43,15 @@ public:
   SegmentationResult predict(const cv::Mat &bgr_image,
                              float prob_threshold = 0.5f);
 
+  int input_height() const noexcept { return input_height_; }
+  int input_width() const noexcept { return input_width_; }
+
 private:
   /**
-   * @brief Converts a BGR uint8 OpenCV image into a flat NCHW float32 tensor
-   * normalized with ImageNet stats.
+   * @brief Converts a BGR uint8 OpenCV image (pre-sized to model dimensions) into
+   * a flat NCHW float32 tensor normalized with ImageNet stats.
    */
-  std::vector<float> preprocess(const cv::Mat &bgr_image) const;
+  std::vector<float> preprocess(const cv::Mat &resized_bgr) const;
 
   /**
    * @brief Thresholds raw output logits and draws predicted cell membrane

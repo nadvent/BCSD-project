@@ -177,11 +177,9 @@ message(STATUS "Found ONNX Runtime Library : ${ONNXRUNTIME_LIB}")
 # ==============================================================================
 
 add_executable(inference_app
-
     src/main.cpp
-
     src/inference_engine.cpp
-
+    include/inference_engine.hpp
 )
 
 

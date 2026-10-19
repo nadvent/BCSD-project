@@ -33,7 +33,15 @@ An end-to-end computer vision and systems engineering pipeline combining **PyTor
 
 ## Overview
 
-Accurate identification and boundary localization of hematological cells (erythrocytes/red blood cells, leukocytes/white blood cells, and platelets) in peripheral blood smears is an essential diagnostic step in clinical pathology. This repository bridges research and production deployment:
+Accurate identification and boundary localization of hematological cells (erythrocytes/red blood cells, leukocytes/white blood cells, and platelets) in peripheral blood smears is an essential diagnostic step in clinical pathology. To address this, the project implements a **U-Net** segmentation architecture—widely regarded as an industry standard in biomedical imaging for its ability to extract fine-grained local morphological features, fuse multi-scale spatial context via symmetric skip connections, and generalize effectively from small clinical datasets when paired with spatial data augmentation.
+
+The model architecture is primarily based on the foundational 2015 U-Net paper by Ronneberger et al. ([U-Net: Convolutional Networks for Biomedical Image Segmentation](https://www.google.com/search?q=https%3A%2F%2Farxiv.org%2Fabs%2F1505.04597)), supporting both **`valid` (unpadded)** convolutions—which eliminate border zero-padding artifacts and require center-cropping along skip connections—and **`same` (one-padded)** convolutions—which preserve exact spatial dimensions ($H \times W$) throughout the contracting and expanding paths. Do note that since `same` padded convolutions have a larger output size (dimensionality), there is more complexity to train and evaluate the model.
+
+## References
+
+- Ronneberger, O., Fischer, P., & Brox, T. (2015). [U-Net: Convolutional Networks for Biomedical Image Segmentation](https://www.google.com/search?q=https%3A%2F%2Farxiv.org%2Fabs%2F1505.04597). In _Medical Image Computing and Computer-Assisted Intervention – MICCAI 2015_ (pp. 234–241). Springer. (`arXiv:1505.04597`)
+
+This repository bridges research experimentation and production deployment:
 
 - **Python Research & Training Pipeline (`src/python/`)**:
   - **Synchronized Augmentations (`src/python/dataset.py`)**: Custom `VisionDataset` leveraging `torchvision.transforms.v2` for mathematically consistent spatial augmentations—bilinear interpolation for continuous RGB imagery, nearest-neighbor projection to preserve discrete mask topology, and synchronized stochastic dihedral flipping ($g_\theta \in D_2$).
@@ -58,12 +66,6 @@ Accurate identification and boundary localization of hematological cells (erythr
                        +-------------------------------+
                        |  Blood Cell Dataset (BCCD)    |
                        |  (data/train & data/test)     |
-                       +---------------+---------------+
-                                       |
-                                       v
-                       +-------------------------------+
-                       |    Quarto EDA (.qmd)          |
-                       |  (notebook/dataset_explor...) |
                        +---------------+---------------+
                                        |
                                        v

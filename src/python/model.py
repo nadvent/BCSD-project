@@ -16,7 +16,7 @@ class DoubleConv(nn.Module):
         self,
         in_channels: int,
         out_channels: int,
-        padding: int = 1, # Configure for same or valid padding see README.md
+        padding: int = 1,  # Configure for same or valid padding see README.md
     ) -> None:
         super().__init__()
 
@@ -26,14 +26,13 @@ class DoubleConv(nn.Module):
             nn.Conv2d(
                 in_channels,
                 out_channels,
-                kernel_size=3, # f
-                stride = 1, # s
-                padding=padding,# p
-                bias = False, # unneeded due to BatchNorm2d normalizing it after
+                kernel_size=3,  # f
+                stride=1,  # s
+                padding=padding,  # p
+                bias=False,  # unneeded due to BatchNorm2d normalizing it after
             ),
-            nn.BatchNorm2d(out_channels), # to reduce covariance between each "channel"
+            nn.BatchNorm2d(out_channels),  # to reduce covariance between each "channel"
             nn.ReLU(inplace=True),
-
             # Repeat the same steps
             nn.Conv2d(
                 out_channels,
@@ -41,16 +40,16 @@ class DoubleConv(nn.Module):
                 kernel_size=3,
                 stride=1,
                 padding=padding,
-                bias=False
+                bias=False,
             ),
             # Batch Normalization: Accelerating Deep Network Training by
             # Reducing Internal Covariate Shift <https://arxiv.org/abs/1502.03167>
             nn.BatchNorm2d(out_channels),
-            nn.ReLU(inplace=True)
+            nn.ReLU(inplace=True),
         )
 
     @override
-    def forward(self, x:torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         return cast(torch.Tensor, self.conv_block(x))
 
 
@@ -59,7 +58,7 @@ class DoubleConv(nn.Module):
 @final
 class UNet(nn.Module):
     padding: int
-    pool: nn.MaxPool2d # using maxpool
+    pool: nn.MaxPool2d  # using maxpool
 
     # Encode Blocks 1-4
     enc1: DoubleConv
@@ -85,13 +84,12 @@ class UNet(nn.Module):
     def __init__(
         self,
         in_channels: int = 3,
-        out_channels: int = 1, # greyscale
+        out_channels: int = 1,  # greyscale
         padding: int = 0,
     ) -> None:
         super().__init__()
         self.padding = padding
         self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
-
 
         self.enc1 = DoubleConv(in_channels, 64, padding=padding)
         self.enc2 = DoubleConv(64, 128, padding=padding)
@@ -100,14 +98,14 @@ class UNet(nn.Module):
 
         self.bottleneck = DoubleConv(512, 1024, padding=padding)
 
-        '''
+        """
         Up-Conv or Transpose-convolutions 2x2,
         Upsample the image, decrease channels.
         it's pretty accurate because the information from
         the (feature maps in) encoder helps "skip connections" that provide spatial data
         We doubleconv again to combine the information from the upsampled layer
         It's also for refining data and avoiding artifacts caused by a 2x2 up-conv
-        '''
+        """
 
         self.up4 = nn.ConvTranspose2d(1024, 512, kernel_size=2, stride=2)
         self.dec4 = DoubleConv(1024, 512, padding=padding)
@@ -133,16 +131,16 @@ class UNet(nn.Module):
         encoder_tensor: torch.Tensor,
         target_height: int,
         target_width: int,
-    )->torch.Tensor:
+    ) -> torch.Tensor:
 
         _, _, h, w = encoder_tensor.shape
-        diff_y: int 
-        diff_x: int
 
         diff_y = (h - target_height) // 2
         diff_x = (w - target_width) // 2
 
-        return encoder_tensor[:, :, diff_y : diff_y + target_height, diff_x : diff_x + target_width]
+        return encoder_tensor[
+            :, :, diff_y : diff_y + target_height, diff_x : diff_x + target_width
+        ]
 
     # Forward propagation (output) and linking all the layers
     @override
@@ -183,6 +181,7 @@ class UNet(nn.Module):
 
         return cast(torch.Tensor, self.final_conv(d1))
 
+
 if __name__ == "__main__":
     dummy_input: torch.Tensor = torch.randn(4, 3, 416, 416)
 
@@ -196,4 +195,3 @@ if __name__ == "__main__":
     padded_model = UNet(in_channels=3, out_channels=1, padding=1)
     padded_out: torch.Tensor = padded_model(dummy_input)  # pyright: ignore[reportAny]
     print(f"Padded output shape:   {padded_out.shape}  # [4, 1, 416, 416]")
-
