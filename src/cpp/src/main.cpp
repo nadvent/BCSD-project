@@ -5,6 +5,7 @@
 #include <iostream>
 #include <opencv2/opencv.hpp>
 #include <string>
+#include <thread>
 
 namespace fs = std::filesystem;
 
@@ -16,18 +17,23 @@ static void print_usage(const char *prog_name) {
       << "  -i, --image <path>       (Required) Path to input image (e.g. blood_smear.jpg)\n"
       << "  -m, --model <path>       Path to ONNX model (default: ./outputs/model.onnx)\n"
       << "  -o, --output <prefix>    Output path prefix (default: ./outputs/cpp_pred)\n"
-      << "  -t, --threads <num>      Number of CPU threads for inference (default: 4)\n"
+      << "  -d, --device <provider>  Execution provider: auto, cuda, dnnl, cpu (default: auto)\n"
+      << "  -t, --threads <num>      Number of CPU threads for inference (default: physical cores)\n"
+      << "  -w, --warmup <num>       Number of warmup iterations before timing (default: 1)\n"
       << "  -p, --threshold <float>  Segmentation probability threshold in (0, 1) (default: 0.5)\n"
       << "  -h, --help               Display this help message and exit\n\n"
       << "Example:\n"
-      << "  " << prog_name << " --image data/test/original/001.jpg --model outputs/model.onnx\n";
+      << "  " << prog_name << " --image data/test/original/001.jpg --model outputs/model.onnx --device auto\n";
 }
 
 int main(int argc, char *argv[]) {
   std::string model_path = "./outputs/model.onnx";
   std::string image_path;
   std::string output_prefix = "./outputs/cpp_pred";
-  int num_threads = 4;
+  std::string device = "auto";
+  unsigned int hw_threads = std::thread::hardware_concurrency();
+  int num_threads = (hw_threads >= 4) ? static_cast<int>(hw_threads / 2) : 4;
+  int warmup_runs = 1;
   float prob_threshold = 0.5f;
 
   for (int i = 1; i < argc; ++i) {
@@ -57,6 +63,13 @@ int main(int argc, char *argv[]) {
         return 1;
       }
       output_prefix = argv[++i];
+    } else if (arg == "-d" || arg == "--device") {
+      if (i + 1 >= argc) {
+        std::cerr << "Error: " << arg << " requires an argument.\n";
+        print_usage(argv[0]);
+        return 1;
+      }
+      device = argv[++i];
     } else if (arg == "-t" || arg == "--threads") {
       if (i + 1 >= argc) {
         std::cerr << "Error: " << arg << " requires an argument.\n";
@@ -71,6 +84,22 @@ int main(int argc, char *argv[]) {
         }
       } catch (const std::exception &e) {
         std::cerr << "Error: Invalid thread count '" << argv[i] << "'.\n";
+        return 1;
+      }
+    } else if (arg == "-w" || arg == "--warmup") {
+      if (i + 1 >= argc) {
+        std::cerr << "Error: " << arg << " requires an argument.\n";
+        print_usage(argv[0]);
+        return 1;
+      }
+      try {
+        warmup_runs = std::stoi(argv[++i]);
+        if (warmup_runs < 0) {
+          std::cerr << "Error: Warmup count must be non-negative.\n";
+          return 1;
+        }
+      } catch (const std::exception &e) {
+        std::cerr << "Error: Invalid warmup count '" << argv[i] << "'.\n";
         return 1;
       }
     } else if (arg == "-p" || arg == "--threshold") {
@@ -120,7 +149,10 @@ int main(int argc, char *argv[]) {
     }
 
     std::cout << "Loading ONNX model from: " << model_path << "\n";
-    bcsd::SegmentationEngine engine(model_path, num_threads);
+    bcsd::SegmentationEngine engine(model_path, num_threads, device);
+    if (warmup_runs > 0) {
+      engine.warmup(warmup_runs);
+    }
 
     bcsd::SegmentationResult result = engine.predict(image, prob_threshold);
 
@@ -150,6 +182,7 @@ int main(int argc, char *argv[]) {
 
     std::cout << "--------------------------------------------------\n";
     std::cout << "C++ ONNX Runtime Inference Complete!\n";
+    std::cout << "  Execution Provider   : " << engine.active_provider() << "\n";
     std::cout << "  Input Dimensions     : " << image.cols << "x" << image.rows << "\n";
     std::cout << "  Model Target Res     : " << engine.input_width() << "x"
               << engine.input_height() << "\n";

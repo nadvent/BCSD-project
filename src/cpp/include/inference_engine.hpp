@@ -23,15 +23,24 @@ public:
    * Inspects model input dimensions if specified in graph metadata.
    * @param model_path Path to serialized model.onnx file.
    * @param num_threads Number of intra-op CPU threads for ONNX Runtime.
+   * @param device Execution provider preference: "auto", "cuda", "dnnl", or "cpu".
    */
   explicit SegmentationEngine(const std::string &model_path,
-                              int num_threads = 4);
+                              int num_threads = 4,
+                              const std::string &device = "auto");
 
   ~SegmentationEngine() = default;
 
   // Disable copying since Ort::Session manages native runtime resources
   SegmentationEngine(const SegmentationEngine &) = delete;
   SegmentationEngine &operator=(const SegmentationEngine &) = delete;
+
+  /**
+   * @brief Runs dummy forward passes to warm up execution provider kernels and
+   * memory arenas prior to latency-critical inference.
+   * @param iterations Number of warm-up passes to execute.
+   */
+  void warmup(int iterations = 1);
 
   /**
    * @brief Runs end-to-end preprocessing, ONNX inference, and contour
@@ -45,6 +54,9 @@ public:
 
   int input_height() const noexcept { return input_height_; }
   int input_width() const noexcept { return input_width_; }
+  const std::string &active_provider() const noexcept {
+    return active_provider_;
+  }
 
 private:
   /**
@@ -52,6 +64,12 @@ private:
    * a flat NCHW float32 tensor normalized with ImageNet stats.
    */
   std::vector<float> preprocess(const cv::Mat &resized_bgr) const;
+
+  /**
+   * @brief Fused single-pass BGR uint8 -> planar NCHW float32 normalization
+   * writing directly into a pre-allocated buffer (zero intermediate allocations).
+   */
+  void preprocess_into(const cv::Mat &resized_bgr, float *dst) const;
 
   /**
    * @brief Thresholds raw output logits and draws predicted cell membrane
@@ -65,12 +83,34 @@ private:
   Ort::Env env_;
   Ort::SessionOptions session_options_;
   std::unique_ptr<Ort::Session> session_;
+  Ort::MemoryInfo memory_info_;
+  Ort::RunOptions run_options_;
+
+  std::string active_provider_{"CPUExecutionProvider"};
+  std::string input_name_{"input"};
+  std::string output_name_{"logits"};
+  std::array<const char *, 1> input_names_{nullptr};
+  std::array<const char *, 1> output_names_{nullptr};
 
   int input_height_{416};
   int input_width_{416};
+  std::array<int64_t, 4> input_shape_{1, 3, 416, 416};
+  std::vector<float> input_buffer_;
+  Ort::Value input_tensor_{nullptr};
+  std::unique_ptr<Ort::IoBinding> io_binding_;
 
   static constexpr std::array<float, 3> kImageNetMean{0.485f, 0.456f, 0.406f};
   static constexpr std::array<float, 3> kImageNetStd{0.229f, 0.224f, 0.225f};
+
+  // Precomputed scale = 1 / (255 * std) and bias = -mean / std for fused FMA
+  static constexpr std::array<float, 3> kNormScale{
+      1.0f / (255.0f * kImageNetStd[0]),
+      1.0f / (255.0f * kImageNetStd[1]),
+      1.0f / (255.0f * kImageNetStd[2])};
+  static constexpr std::array<float, 3> kNormBias{
+      -kImageNetMean[0] / kImageNetStd[0],
+      -kImageNetMean[1] / kImageNetStd[1],
+      -kImageNetMean[2] / kImageNetStd[2]};
 };
 
 } // namespace bcsd

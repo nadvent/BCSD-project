@@ -208,12 +208,23 @@ target_link_libraries(inference_app PRIVATE
 
     ${ONNXRUNTIME_LIB}
 
+    ${CMAKE_DL_LIBS}
+
 )
 
 
 
-# Enable strict modern C++ warnings
+# Enable strict modern C++ warnings and aggressive Release optimizations
+target_compile_options(inference_app PRIVATE
+    -Wall -Wextra -Wpedantic
+    $<$<CONFIG:Release>:-O3 -march=native -funroll-loops>
+)
 
-target_compile_options(inference_app PRIVATE -Wall -Wextra -Wpedantic)
+# Enable Link-Time Optimization (LTO / IPO) in Release builds if supported
+include(CheckIPOSupported)
+check_ipo_supported(RESULT ipo_supported OUTPUT ipo_error)
+if(ipo_supported)
+    set_target_properties(inference_app PROPERTIES INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+endif()
 
 
