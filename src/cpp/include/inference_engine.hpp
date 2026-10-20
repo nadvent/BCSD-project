@@ -52,6 +52,22 @@ public:
   SegmentationResult predict(const cv::Mat &bgr_image,
                              float prob_threshold = 0.5f);
 
+  /**
+   * @brief Runs end-to-end preprocessing, ONNX inference, and contour postprocessing
+   * while measuring individual stage latencies in milliseconds.
+   */
+  SegmentationResult predict(const cv::Mat &bgr_image,
+                             float prob_threshold,
+                             double &out_preprocess_ms,
+                             double &out_inference_ms,
+                             double &out_postprocess_ms);
+
+  /**
+   * @brief Executes a single forward pass using currently bound input tensor buffers,
+   * returning pure graph execution latency in milliseconds.
+   */
+  double run_pure_inference();
+
   int input_height() const noexcept { return input_height_; }
   int input_width() const noexcept { return input_width_; }
   const std::string &active_provider() const noexcept {

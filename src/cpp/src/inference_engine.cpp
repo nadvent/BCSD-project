@@ -206,6 +206,13 @@ void SegmentationEngine::warmup(int iterations) {
   }
 }
 
+double SegmentationEngine::run_pure_inference() {
+  auto start = std::chrono::high_resolution_clock::now();
+  session_->Run(run_options_, *io_binding_);
+  auto end = std::chrono::high_resolution_clock::now();
+  return std::chrono::duration<double, std::milli>(end - start).count();
+}
+
 void SegmentationEngine::preprocess_into(const cv::Mat &resized_bgr,
                                          float *dst) const {
   if (resized_bgr.empty()) {
@@ -300,6 +307,15 @@ void SegmentationEngine::postprocess(const float *logits, int out_h, int out_w,
 
 SegmentationResult SegmentationEngine::predict(const cv::Mat &bgr_image,
                                                float prob_threshold) {
+  double pre_ms = 0.0, infer_ms = 0.0, post_ms = 0.0;
+  return predict(bgr_image, prob_threshold, pre_ms, infer_ms, post_ms);
+}
+
+SegmentationResult SegmentationEngine::predict(const cv::Mat &bgr_image,
+                                               float prob_threshold,
+                                               double &out_preprocess_ms,
+                                               double &out_inference_ms,
+                                               double &out_postprocess_ms) {
   if (bgr_image.empty()) {
     throw std::invalid_argument("Input BGR image is empty.");
   }
@@ -308,7 +324,8 @@ SegmentationResult SegmentationEngine::predict(const cv::Mat &bgr_image,
         "Probability threshold must be strictly between 0.0 and 1.0.");
   }
 
-  // Resize input to model dimensions only once
+  // Preprocessing (Resize + fused ImageNet normalization into pinned buffer)
+  auto t_pre_start = std::chrono::high_resolution_clock::now();
   cv::Mat resized_bgr;
   if (bgr_image.rows == input_height_ && bgr_image.cols == input_width_) {
     resized_bgr = bgr_image;
@@ -317,17 +334,21 @@ SegmentationResult SegmentationEngine::predict(const cv::Mat &bgr_image,
                0.0, 0.0, cv::INTER_LINEAR);
   }
 
-  // Normalize directly into pre-allocated input buffer and bind for execution
   preprocess_into(resized_bgr, input_buffer_.data());
   io_binding_->BindInput(input_name_.c_str(), input_tensor_);
+  auto t_pre_end = std::chrono::high_resolution_clock::now();
+  out_preprocess_ms =
+      std::chrono::duration<double, std::milli>(t_pre_end - t_pre_start).count();
 
-  auto start = std::chrono::high_resolution_clock::now();
+  // Inference (Graph execution)
+  auto t_infer_start = std::chrono::high_resolution_clock::now();
   session_->Run(run_options_, *io_binding_);
-  auto end = std::chrono::high_resolution_clock::now();
-  double inference_ms =
-      std::chrono::duration<double, std::milli>(end - start).count();
+  auto t_infer_end = std::chrono::high_resolution_clock::now();
+  out_inference_ms =
+      std::chrono::duration<double, std::milli>(t_infer_end - t_infer_start).count();
 
-  // Extract output shape [1, 1, out_h, out_w] and raw float pointer
+  // Postprocessing (SIMD thresholding + contours)
+  auto t_post_start = std::chrono::high_resolution_clock::now();
   std::vector<Ort::Value> output_tensors = io_binding_->GetOutputValues();
   auto type_info = output_tensors.front().GetTensorTypeAndShapeInfo();
   std::vector<int64_t> out_shape = type_info.GetShape();
@@ -340,8 +361,11 @@ SegmentationResult SegmentationEngine::predict(const cv::Mat &bgr_image,
   cv::Mat contour_overlay;
   postprocess(logits_ptr, out_h, out_w, resized_bgr, prob_threshold,
               binary_mask, contour_overlay);
+  auto t_post_end = std::chrono::high_resolution_clock::now();
+  out_postprocess_ms =
+      std::chrono::duration<double, std::milli>(t_post_end - t_post_start).count();
 
-  return SegmentationResult{binary_mask, contour_overlay, inference_ms};
+  return SegmentationResult{binary_mask, contour_overlay, out_inference_ms};
 }
 
 } // namespace bcsd

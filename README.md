@@ -26,6 +26,7 @@ An end-to-end computer vision and systems engineering pipeline combining **PyTor
   - [6. Latency Profiling & Systems Benchmarking](#6-latency-profiling--systems-benchmarking)
   - [7. Interactive Reports & Reveal.js Presentations](#7-interactive-reports--revealjs-presentations)
 - [Quantitative Results Summary](#quantitative-results-summary)
+  - [Systems & Latency Benchmarks (C++ ORT vs. Python ORT vs. PyTorch)](#systems--latency-benchmarks-c-ort-vs-python-ort-vs-pytorch)
 - [Configuration Reference](#configuration-reference)
 - [License](#license)
 
@@ -123,7 +124,7 @@ All scripts, C++ modules, notebooks, and configurations follow standard, consist
 │   ├── presentation.qmd             # Reveal.js 11-slide technical portfolio presentation
 │   └── cpp_inference_comparison.png # 4-column visual verification grid
 ├── outputs/                         # Model checkpoints, ONNX graphs, and inference artifacts
-│   ├── best_model.pth               # Optimal PyTorch weights (Val Dice: 0.9475)
+│   ├── best_model.pth               # Optimal PyTorch weights (Test Dice: 0.9655)
 │   ├── last_model.pth               # Final epoch checkpoint
 │   ├── model.onnx                   # Serialized static ONNX computational graph
 │   └── cpp_sample_*_{mask,overlay}.png # C++ inference engine output masks and overlays
@@ -192,7 +193,7 @@ data/
 
 ### Python Environment (uv or venv)
 
-We recommend using [uv](https://www.google.com/search?q=https%3A%2F%2Fgithub.com%2Fastral-sh%2Fuv) for fast, reproducible dependency resolution, or standard `venv`:
+I personally use[uv](https://www.google.com/search?q=https%3A%2F%2Fgithub.com%2Fastral-sh%2Fuv) for fast, reproducible dependency resolution, or standard `venv`:
 
 #### Option A: Using `uv` (Recommended)
 
@@ -238,16 +239,9 @@ sudo pacman -Syu
 sudo pacman -S cmake base-devel opencv onnxruntime --noconfirm
 ```
 
-#### Ubuntu / Debian
-
-```bash
-sudo apt-get update
-sudo apt-get install -y cmake build-essential libopencv-dev libonnxruntime-dev
-```
-
 ### Locating ONNX Runtime on Linux (Arch / Debian / Ubuntu)
 
-Our modern `src/cpp/CMakeLists.txt` automatically scans standard distribution directories for headers (`onnxruntime_cxx_api.h`) and libraries (`libonnxruntime.so`).
+`src/cpp/CMakeLists.txt` automatically scans standard distribution directories for headers (`onnxruntime_cxx_api.h`) and libraries (`libonnxruntime.so`).
 
 If your package manager installs ONNX Runtime in a custom location (e.g. `/usr/include/onnxruntime` or `/usr/local/include`), you can verify and pass them explicitly:
 
@@ -357,7 +351,7 @@ cmake --build src/cpp/build -j$(nproc)
 # 2. Run inference on a test blood smear image
 ./src/cpp/build/inference_app \
   --model outputs/model.onnx \
-  --image data/test/original/sample.jpg \
+  --image data/test/original/e02301ac-68f7-4daf-b2ba-254b917f1cca.jpg \
   --output outputs/cpp_sample_1
 ```
 
@@ -365,11 +359,15 @@ The application outputs:
 
 - `outputs/cpp_sample_1_mask.png`: Binary prediction mask (`uint8_t`, $\{0, 255\}$)
 - `outputs/cpp_sample_1_overlay.png`: Anti-aliased red cell membrane contours overlaid on the aligned smear image
-- Execution latency printed directly to the console:
+- Execution latency and provider info printed directly to the console:
   ```text
+  Loading ONNX model from: outputs/model.onnx
   --------------------------------------------------
   C++ ONNX Runtime Inference Complete!
-    Forward Pass Latency : 14.28 ms
+    Execution Provider   : CUDAExecutionProvider
+    Input Dimensions     : 1944x1383
+    Model Target Res     : 416x416
+    Forward Pass Latency : 42.27 ms
     Output Mask Size     : 228x228
     Saved Binary Mask    : outputs/cpp_sample_1_mask.png
     Saved Contour Overlay: outputs/cpp_sample_1_overlay.png
@@ -381,14 +379,22 @@ The application outputs:
 Profile performance differences across runtime backends:
 
 ```bash
-python src/python/benchmark_python.py \
-  --model outputs/best_model.pth \
-  --onnx outputs/model.onnx \
-  --image data/test/original/sample.jpg \
-  --runs 100
+python src/python/benchmark_python.py
 ```
 
-This benchmarks **PyTorch Eager**, **`torch.compile(mode="max-autotune")`**, and **ONNX Runtime (CPU/CUDA)**, isolating forward pass time ($T_{\text{infer}}$) from end-to-end I/O ($T_{\text{e2e}}$) and memory footprint (`RSS`).
+Console benchmark output on NVIDIA RTX 3050 Laptop GPU (100 timed runs, 25 warmup passes):
+
+```text
+Benchmarking on: cuda (NVIDIA GeForce RTX 3050 Laptop GPU)
+
+Framework                    | Median (P50) | Mean ± Std         | P95 Latency
+------------------------------------------------------------------------------
+PyTorch Eager                |    33.71 ms |  33.73 ± 0.06   ms |    33.88 ms
+torch.compile(reduce-overhead) |    31.28 ms |  31.29 ± 0.17   ms |    31.57 ms
+Python ONNX Runtime          |    34.39 ms |  34.41 ± 0.13   ms |    34.64 ms
+```
+
+This benchmarks **PyTorch Eager**, **`torch.compile(mode="reduce-overhead")`**, and **Python ONNX Runtime**, evaluating kernel launch synchronization and execution latency under matched batch sizes ($N=1$, $3\times 416\times 416$).
 
 ### 7. Interactive Reports & Reveal.js Presentations
 
@@ -416,11 +422,39 @@ Trained on $1,169$ blood smears and benchmarked across $159$ held-out test smear
 
 | Evaluation Metric                         | Test Set Score | Mathematical Formulation                                                                    |
 | :---------------------------------------- | :------------: | :------------------------------------------------------------------------------------------ |
-| **Sørensen–Dice ($F_1$)**                 |  **`0.9475`**  | $D = \frac{2                                                                                | P \cap G                                         | }{         | P        | +                                                                          | G   | } = \frac{2\text{TP}}{2\text{TP} + \text{FP} + \text{FN}}$ |
-| **Jaccard Index (IoU)**                   |  **`0.9050`**  | $J = \frac{                                                                                 | P \cap G                                         | }{         | P \cup G | } = \frac{\text{TP}}{\text{TP} + \text{FP} + \text{FN}} = \frac{D}{2 - D}$ |
-| **Pixel Accuracy**                        |  **`0.9660`**  | $\text{Acc} = \frac{\text{TP} + \text{TN}}{\text{TP} + \text{TN} + \text{FP} + \text{FN}}$  |
-| **Combined Loss**                         |  **`0.1262`**  | $\mathcal{L}_{\text{total}} = 0.5 \mathcal{L}_{\text{BCE}} + 0.5 \mathcal{L}_{\text{Dice}}$ |
-| **PyTorch $\leftrightarrow$ ONNX Parity** | **`2.42e-06`** | $\max_i                                                                                     | z_{\text{PyTorch}}^{(i)} - z_{\text{ONNX}}^{(i)} | < 10^{-5}$ |
+| **Sørensen–Dice ($F_1$)**                 |  **`0.9655`**  | $D = \frac{2 | P \cap G | }{ | P | + | G | } = \frac{2\text{TP}}{2\text{TP} + \text{FP} + \text{FN}}$ |
+| **Jaccard Index (IoU)**                   |  **`0.9344`**  | $J = \frac{ | P \cap G | }{ | P \cup G | } = \frac{\text{TP}}{\text{TP} + \text{FP} + \text{FN}} = \frac{D}{2 - D}$ |
+| **Pixel Accuracy**                        |  **`0.9766`**  | $\text{Acc} = \frac{\text{TP} + \text{TN}}{\text{TP} + \text{TN} + \text{FP} + \text{FN}}$  |
+| **Combined Loss**                         |  **`0.0644`**  | $\mathcal{L}_{\text{total}} = 0.5 \mathcal{L}_{\text{BCE}} + 0.5 \mathcal{L}_{\text{Dice}}$ |
+| **PyTorch $\leftrightarrow$ ONNX Parity** | **`2.42e-06`** | $\max_i | z_{\text{PyTorch}}^{(i)} - z_{\text{ONNX}}^{(i)} | < 10^{-5}$ |
+
+---
+
+### Systems & Latency Benchmarks (C++ ORT vs. Python ORT vs. PyTorch)
+
+Benchmarked on **NVIDIA GeForce RTX 3050 Laptop GPU** (CUDA 13.4, cuDNN 9) and **AMD Ryzen 7 6800HS CPU** ($N=1$, input rescaled to $3\times 416\times 416$, 100 timed iterations, 25 warmup passes):
+
+#### Tier 1: Pure Model Forward Pass Latency ($T_{\text{infer}}$)
+
+| Runtime / Framework | Provider / Device | Median ($P_{50}$) | Mean $\pm$ Std | $P_{95}$ Latency |
+| :------------------ | :---------------- | :---------------: | :------------: | :--------------: |
+| **PyTorch (`torch.compile`)** | CUDA (`reduce-overhead`) | **`31.09 ms`** | `31.13 ± 0.13 ms` | `31.33 ms` |
+| **PyTorch (`torch.compile`)** | CUDA (`default`)         | `31.68 ms` | `31.76 ± 0.35 ms` | `32.44 ms` |
+| **PyTorch Eager**             | CUDA                     | `33.74 ms` | `33.75 ± 0.07 ms` | `33.87 ms` |
+| **C++ ONNX Runtime**          | `CUDAExecutionProvider`  | **`33.84 ms`** | `34.16 ± 0.59 ms` | `35.20 ms` |
+| **Python ONNX Runtime**       | `CUDAExecutionProvider`  | **`33.90 ms`** | `33.91 ± 0.07 ms` | `34.04 ms` |
+| **C++ ONNX Runtime (CPU)**    | `CPUExecutionProvider` (8T) | `192.45 ms` | `193.10 ± 1.15 ms` | `195.40 ms` |
+
+#### Tier 2: In-Memory End-to-End Pipeline ($T_{\text{pre}} + T_{\text{infer}} + T_{\text{post}}$)
+
+| Runtime / Framework | Preprocessing ($T_{\text{pre}}$) | Forward Pass ($T_{\text{infer}}$) | Postprocessing ($T_{\text{post}}$) | Total In-Memory ($P_{50}$) | Throughput |
+| :------------------ | :-----------------------------: | :-------------------------------: | :--------------------------------: | :------------------------: | :--------: |
+| **C++ ONNX Runtime** | **`0.53 ms`** | `33.82 ms` | **`0.62 ms`** | **`35.00 ms`** | **`28.57 FPS`** |
+| **PyTorch (`torch.compile`)** | `5.14 ms` | **`31.39 ms`** | `0.93 ms` | `37.62 ms` | `26.58 FPS` |
+| **Python ONNX Runtime** | `3.46 ms` | `34.01 ms` | `0.72 ms` | `38.21 ms` | `26.17 FPS` |
+
+> **Key Takeaway**: While `torch.compile(mode="reduce-overhead")` delivers the fastest pure GPU forward pass via CUDA Graph launch capture, the **C++ ONNX Runtime engine achieves the highest overall system throughput (`28.57 FPS`)** because its fused single-pass ImageNet normalization and OpenCV SIMD contour thresholding avoid Python GIL, NumPy array transpositions, and dynamic heap re-allocations.
+
 
 ---
 
@@ -437,7 +471,9 @@ Default training and inference parameters in `config/` and CLI flags:
 | `padding`            |           `0`           | `--padding` (train/export)            | `0` = unpadded ($228\times 228$ out), `1` = padded ($416\times 416$ out) |
 | `opset_version`      |          `17`           | `--opset` (export)                    | Target ONNX operator set version                                         |
 | `prob_threshold`     |          `0.5`          | `predict(..., 0.5f)` (C++)            | Probability threshold ($z > 0.0\text{f}$ logit threshold)                |
-| `num_threads`        |           `4`           | `SegmentationEngine(..., 4)`          | Number of intra-op threads for ONNX Runtime                              |
+| `device`             |         `auto`          | `--device` / `-d` (C++)               | Execution provider (`auto`, `cuda`, `dnnl`, `cpu`)                       |
+| `num_threads`        |    `physical cores`     | `--threads` / `-t` (C++)              | Number of intra-op threads for ONNX Runtime                              |
+| `warmup`             |           `1`           | `--warmup` / `-w` (C++)               | Number of warmup forward passes before timing                            |
 | `normalization_mean` | `[0.485, 0.456, 0.406]` | `dataset.py` / `inference_engine.hpp` | ImageNet RGB mean values                                                 |
 | `normalization_std`  | `[0.229, 0.224, 0.225]` | `dataset.py` / `inference_engine.hpp` | ImageNet RGB standard deviation                                          |
 

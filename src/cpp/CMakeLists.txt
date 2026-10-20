@@ -227,4 +227,36 @@ if(ipo_supported)
     set_target_properties(inference_app PROPERTIES INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
 endif()
 
+# ==============================================================================
+# 4. Define the Systems Benchmark Target
+# ==============================================================================
+add_executable(benchmark_ort
+    src/benchmark_ort.cpp
+    src/inference_engine.cpp
+    include/inference_engine.hpp
+)
+
+target_include_directories(benchmark_ort PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${OpenCV_INCLUDE_DIRS}
+    ${ONNXRUNTIME_INCLUDE_DIR}
+    "${ONNXRUNTIME_INCLUDE_DIR}/.."
+)
+
+target_link_libraries(benchmark_ort PRIVATE
+    ${OpenCV_LIBS}
+    ${ONNXRUNTIME_LIB}
+    ${CMAKE_DL_LIBS}
+)
+
+target_compile_options(benchmark_ort PRIVATE
+    -Wall -Wextra -Wpedantic
+    $<$<CONFIG:Release>:-O3 -march=native -funroll-loops>
+)
+
+if(ipo_supported)
+    set_target_properties(benchmark_ort PROPERTIES INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+endif()
+
+
 
