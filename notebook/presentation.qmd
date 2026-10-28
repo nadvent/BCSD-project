@@ -267,7 +267,7 @@ In interviews, explaining normalization via the eigenvalue spread and condition 
 - **DoubleConv Block**: Two $3\times 3$ convolutions (`bias=False` since `BatchNorm2d` affine shift $\beta_c$ absorbs any additive bias) + `BatchNorm2d` + `ReLU(inplace=True)`.
 - **Unpadded Mode (`padding=0`, Ronneberger et al. 2015)**:
   - Each `DoubleConv` reduces height and width by $4\text{ px}$; across 4 encoder stages ($64 \to 128 \to 256 \to 512$), bottleneck ($1024$), and 4 decoder stages:
-  $$H_{\text{in}} = 416 \longrightarrow H_{\text{bottleneck}} = 24 \longrightarrow H_{\text{out}} = 228$$
+  $$H_{\text{in}} = 416 \longrightarrow H_{\text{bottleneck}} = 18 \longrightarrow H_{\text{out}} = 228$$
   - Eliminates zero-padding border hallucination; uses `_center_crop` on encoder skip tensors and a $94\text{ px}$ target border crop.
 :::
 
@@ -288,9 +288,9 @@ def _center_crop(
     ]
 
 # Inside UNet.forward():
-d4 = cast(torch.Tensor, self.up4(b))               # [B, 512, 40, 40]
+d4 = cast(torch.Tensor, self.up4(b))               # [B, 512, 36, 36]
 e4_cropped = self._center_crop(e4, d4.shape[2], d4.shape[3])
-d4 = torch.cat([e4_cropped, d4], dim=1)            # [B, 1024, 40, 40]
+d4 = torch.cat([e4_cropped, d4], dim=1)            # [B, 1024, 36, 36]
 d4 = cast(torch.Tensor, self.dec4(d4))             # [B, 512, 32, 32]
 ```
 :::
@@ -390,7 +390,7 @@ Because $g(D) = \frac{D}{2 - D}$ is **strictly convex** on $[0, 1)$ ($g''(D) = \
 
 <div class="metric-box">
 **Empirical Consistency Check on `data/test` ($159$ smears):**
-Theoretical single-sample transform of $\bar{D} = 0.9475$ gives $\frac{0.9475}{2 - 0.9475} = 0.9002$; our actual dataset mean IoU is **$\bar{J} = 0.9050$**, confirming tight, low-variance performance across the entire test cohort.
+Theoretical single-sample transform of $\bar{D} = 0.9655$ gives $\frac{0.9655}{2 - 0.9655} = 0.9333$; our actual dataset mean IoU is **$\bar{J} = 0.9344$**, confirming tight, low-variance performance across the entire test cohort.
 </div>
 :::
 
@@ -464,51 +464,37 @@ Explain how calling `model.eval()` before `torch.onnx.export` allows constant fo
 :::: {.columns}
 
 ::: {.column width="46%"}
-#### 1. `HWC` (`BGR`) $\to$ `NCHW` (`RGB`) Planar Layout
-- `cv::imread` allocates interleaved row-major `BGR` bytes: $(y \cdot W + x)\cdot 3 + c$.
-- `SegmentationEngine::preprocess` converts to `RGB` `float32` and writes directly into 3 contiguous planar slices of length $H \cdot W = 173,056$:
-  $$\text{idx}(c, y, x) = c \cdot (H W) + y \cdot W + x$$
+#### 1. Fused Single-Pass FMA Planar Normalization
+- Precomputes scale $\frac{1}{255\sigma}$ and bias $-\frac{\mu}{\sigma}$ to replace divisions with fused multiply-adds (FMA).
+- Writes directly from continuous interleaved `BGR` bytes into contiguous planar slices ($H \cdot W = 173,056$), eliminating intermediate `cv::Mat` heap allocations.
 
-#### 2. Zero-Copy `Ort::Value` Tensor Wrapping
-- Wraps `input_data.data()` directly in CPU arena memory without duplicating the $2.08\text{ MB}$ float buffer.
+#### 2. Persistent `Ort::IoBinding` Pre-allocation
+- Binds persistent `Ort::Value` in CPU arena memory once to eliminate per-inference allocation overhead.
 
-#### 3. Monotonic Logit Thresholding Optimization
-- Since $\sigma(z) = (1 + e^{-z})^{-1}$ is strictly increasing on $\mathbb{R}$:
-  $$\sigma(z) > \tau \iff z > \ln\!\left(\frac{\tau}{1 - \tau}\right)$$
-- For $\tau = 0.5$, $\ln(1) = 0.0\text{f}$: thresholding `z > 0.0f` **eliminates $51,984$ `std::exp()` calls per image**.
+#### 3. Monotonic Logit Thresholding + SIMD Vectorization
+- Since $\sigma(z) > \tau \iff z > \ln(\frac{\tau}{1 - \tau})$, $\tau = 0.5 \implies z > 0.0\text{f}$.
+- Thresholds raw logits directly via `cv::compare(..., CMP_GT)` using hardware SIMD vector instructions.
 :::
 
 ::: {.column width="54%"}
-```{.cpp code-line-numbers="1-9|11-18|20-31"}
+```{.cpp code-line-numbers="1-8|10-14|16-21"}
 // src/cpp/src/inference_engine.cpp
-// 1. Planar NCHW pointer stride arithmetic + ImageNet Z-score
-float* r_plane = input_tensor.data();
-float* g_plane = input_tensor.data() + hw;
-float* b_plane = input_tensor.data() + 2 * hw;
-for (int y = 0; y < input_height_; ++y) {
-    const cv::Vec3f* row_ptr = float_rgb.ptr<cv::Vec3f>(y);
-    for (int x = 0; x < input_width_; ++x) {
-        const int idx = y * input_width_ + x;
-        r_plane[idx] = (row_ptr[x][0] - kImageNetMean[0]) / kImageNetStd[0];
-        g_plane[idx] = (row_ptr[x][1] - kImageNetMean[1]) / kImageNetStd[1];
-        b_plane[idx] = (row_ptr[x][2] - kImageNetMean[2]) / kImageNetStd[2];
-    }
+// 1. Fused single-pass BGR uint8 -> planar NCHW + ImageNet FMA
+const uint8_t* src = resized_bgr.ptr<uint8_t>(0);
+for (int i = 0; i < hw; ++i) {
+    b_plane[i] = static_cast<float>(src[i * 3 + 0]) * b_scale + b_bias;
+    g_plane[i] = static_cast<float>(src[i * 3 + 1]) * g_scale + g_bias;
+    r_plane[i] = static_cast<float>(src[i * 3 + 2]) * r_scale + r_bias;
 }
 
-// 2. Zero-copy Ort::Value tensor binding & session execution
-Ort::Value input_ort = Ort::Value::CreateTensor<float>(
-    memory_info, input_data.data(), input_data.size(),
-    input_shape.data(), input_shape.size());
-auto output_tensors = session_->Run(
-    Ort::RunOptions{nullptr}, input_names, &input_ort, 1, output_names, 1);
+// 2. Persistent Ort::IoBinding & zero-allocation execution
+io_binding_->BindInput(input_name_.c_str(), input_tensor_);
+io_binding_->BindOutput(output_name_.c_str(), memory_info_);
+session_->Run(run_options_, *io_binding_);
 
-// 3. Monotonic logit threshold (z > 0.0f) + OpenCV contour extraction
-const float logit_thresh = std::log(prob_threshold / (1.0f - prob_threshold));
-for (int y = 0; y < out_h; ++y) {
-    uchar* mask_row = out_binary_mask.ptr<uchar>(y);
-    for (int x = 0; x < out_w; ++x)
-        mask_row[x] = (logits[y * out_w + x] > logit_thresh) ? 255 : 0;
-}
+// 3. Monotonic logit threshold (z > 0.0f) via SIMD cv::compare
+const cv::Mat logits_mat(out_h, out_w, CV_32FC1, const_cast<float*>(logits));
+cv::compare(logits_mat, logit_threshold, out_binary_mask, cv::CMP_GT);
 cv::findContours(out_binary_mask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
 cv::drawContours(out_contour_overlay, contours, -1, cv::Scalar(0, 0, 255), 2, cv::LINE_AA);
 ```
@@ -532,8 +518,8 @@ Walk through the three systems optimizations in `inference_engine.cpp`: (1) cont
 | Stage / Split | Combined Loss $\downarrow$ | Mean Dice ($F_1$) $\uparrow$ | Mean IoU ($J$) $\uparrow$ | Pixel Acc $\uparrow$ |
 | :--- | :---: | :---: | :---: | :---: |
 | **Epoch 01 (Val)** | `0.2081` | `0.9118` | `0.8604` | — |
-| **Epoch 02 (Train)** | `0.1471` | `0.9494` | — | — |
-| **Final Test (`data/test`)** | **`0.1262`** | **`0.9475`** | **`0.9050`** | **`0.9660`** |
+| **Epoch 02 (Val)** | `0.1262` | `0.9475` | `0.9050` | `0.9660` |
+| **Final Test (`data/test`)** | **`0.0644`** | **`0.9655`** | **`0.9344`** | **`0.9766`** |
 
 #### Failure Mode & Edge-Case Analysis
 1. **Touching Erythrocytes (Rouleaux Bridges)**:
@@ -549,7 +535,7 @@ Walk through the three systems optimizations in `inference_engine.cpp`: (1) cont
 ::::
 
 ::: {.notes}
-Point to the empirical metrics table—achieving a 0.9475 Dice score and 0.9050 IoU on the 159-image test split—and walk the interviewer through the 4-column visual comparison plot showing sub-pixel contour agreement as well as honest engineering analysis of touching cells.
+Point to the empirical metrics table—achieving a 0.9655 Dice score and 0.9344 IoU on the 159-image test split—and walk the interviewer through the 4-column visual comparison plot showing sub-pixel contour agreement as well as honest engineering analysis of touching cells.
 :::
 
 ---

@@ -1455,7 +1455,7 @@ display:block!important;
 <li><strong>DoubleConv Block</strong>: Two <span class="math inline">3\times 3</span> convolutions (<code>bias=False</code> since <code>BatchNorm2d</code> affine shift <span class="math inline">\beta_c</span> absorbs any additive bias) + <code>BatchNorm2d</code> + <code>ReLU(inplace=True)</code>.</li>
 <li><strong>Unpadded Mode (<code>padding=0</code>, Ronneberger et al. 2015)</strong>:
 <ul>
-<li>Each <code>DoubleConv</code> reduces height and width by <span class="math inline">4\text{ px}</span>; across 4 encoder stages (<span class="math inline">64 \to 128 \to 256 \to 512</span>), bottleneck (<span class="math inline">1024</span>), and 4 decoder stages: <span class="math display">H_{\text{in}} = 416 \longrightarrow H_{\text{bottleneck}} = 24 \longrightarrow H_{\text{out}} = 228</span></li>
+<li>Each <code>DoubleConv</code> reduces height and width by <span class="math inline">4\text{ px}</span>; across 4 encoder stages (<span class="math inline">64 \to 128 \to 256 \to 512</span>), bottleneck (<span class="math inline">1024</span>), and 4 decoder stages: <span class="math display">H_{\text{in}} = 416 \longrightarrow H_{\text{bottleneck}} = 18 \longrightarrow H_{\text{out}} = 228</span></li>
 <li>Eliminates zero-padding border hallucination; uses <code>_center_crop</code> on encoder skip tensors and a <span class="math inline">94\text{ px}</span> target border crop.</li>
 </ul></li>
 </ul>
@@ -1475,9 +1475,9 @@ display:block!important;
 <span id="cb2-13"><a href></a>    ]</span>
 <span id="cb2-14"><a href></a></span>
 <span id="cb2-15"><a href></a><span class="co"># Inside UNet.forward():</span></span>
-<span id="cb2-16"><a href></a>d4 <span class="op">=</span> cast(torch.Tensor, <span class="va">self</span>.up4(b))               <span class="co"># [B, 512, 40, 40]</span></span>
+<span id="cb2-16"><a href></a>d4 <span class="op">=</span> cast(torch.Tensor, <span class="va">self</span>.up4(b))               <span class="co"># [B, 512, 36, 36]</span></span>
 <span id="cb2-17"><a href></a>e4_cropped <span class="op">=</span> <span class="va">self</span>._center_crop(e4, d4.shape[<span class="dv">2</span>], d4.shape[<span class="dv">3</span>])</span>
-<span id="cb2-18"><a href></a>d4 <span class="op">=</span> torch.cat([e4_cropped, d4], dim<span class="op">=</span><span class="dv">1</span>)            <span class="co"># [B, 1024, 40, 40]</span></span>
+<span id="cb2-18"><a href></a>d4 <span class="op">=</span> torch.cat([e4_cropped, d4], dim<span class="op">=</span><span class="dv">1</span>)            <span class="co"># [B, 1024, 36, 36]</span></span>
 <span id="cb2-19"><a href></a>d4 <span class="op">=</span> cast(torch.Tensor, <span class="va">self</span>.dec4(d4))             <span class="co"># [B, 512, 32, 32]</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </div></div>
 <aside class="notes">
@@ -1564,7 +1564,7 @@ display:block!important;
 <li><strong>Mean IoU (<span class="math inline">\mathbb{E}[J]</span>)</strong>: Penalizes worst-case single-image boundary failures much more severely than Mean Dice—essential for clinical quality assurance.</li>
 </ul>
 <div class="metric-box">
-<p><strong>Empirical Consistency Check on <code>data/test</code> (<span class="math inline">159</span> smears):</strong> Theoretical single-sample transform of <span class="math inline">\bar{D} = 0.9475</span> gives <span class="math inline">\frac{0.9475}{2 - 0.9475} = 0.9002</span>; our actual dataset mean IoU is <strong><span class="math inline">\bar{J} = 0.9050</span></strong>, confirming tight, low-variance performance across the entire test cohort.</p>
+<p><strong>Empirical Consistency Check on <code>data/test</code> (<span class="math inline">159</span> smears):</strong> Theoretical single-sample transform of <span class="math inline">\bar{D} = 0.9655</span> gives <span class="math inline">\frac{0.9655}{2 - 0.9655} = 0.9333</span>; our actual dataset mean IoU is <strong><span class="math inline">\bar{J} = 0.9344</span></strong>, confirming tight, low-variance performance across the entire test cohort.</p>
 </div>
 </div></div>
 <aside class="notes">
@@ -1636,52 +1636,40 @@ display:block!important;
 <h3 id="memory-layout-transposition-zero-copy-binding-monotonic-logit-thresholding">Memory Layout Transposition, Zero-Copy Binding &amp; Monotonic Logit Thresholding</h3>
 <div class="columns">
 <div class="column" style="width:46%;">
-<h4 id="hwc-bgr-to-nchw-rgb-planar-layout">1. <code>HWC</code> (<code>BGR</code>) <span class="math inline">\to</span> <code>NCHW</code> (<code>RGB</code>) Planar Layout</h4>
+<h4 id="fused-single-pass-fma-planar-normalization">1. Fused Single-Pass FMA Planar Normalization</h4>
 <ul>
-<li><code>cv::imread</code> allocates interleaved row-major <code>BGR</code> bytes: <span class="math inline">(y \cdot W + x)\cdot 3 + c</span>.</li>
-<li><code>SegmentationEngine::preprocess</code> converts to <code>RGB</code> <code>float32</code> and writes directly into 3 contiguous planar slices of length <span class="math inline">H \cdot W = 173,056</span>: <span class="math display">\text{idx}(c, y, x) = c \cdot (H W) + y \cdot W + x</span></li>
+<li>Precomputes scale <span class="math inline">\frac{1}{255\sigma}</span> and bias <span class="math inline">-\frac{\mu}{\sigma}</span> to replace divisions with fused multiply-adds (FMA).</li>
+<li>Writes directly from continuous interleaved <code>BGR</code> bytes into contiguous planar slices (<span class="math inline">H \cdot W = 173,056</span>), eliminating intermediate <code>cv::Mat</code> heap allocations.</li>
 </ul>
-<h4 id="zero-copy-ortvalue-tensor-wrapping">2. Zero-Copy <code>Ort::Value</code> Tensor Wrapping</h4>
+<h4 id="persistent-ortiobinding-pre-allocation">2. Persistent <code>Ort::IoBinding</code> Pre-allocation</h4>
 <ul>
-<li>Wraps <code>input_data.data()</code> directly in CPU arena memory without duplicating the <span class="math inline">2.08\text{ MB}</span> float buffer.</li>
+<li>Binds persistent <code>Ort::Value</code> in CPU arena memory once to eliminate per-inference allocation overhead.</li>
 </ul>
-<h4 id="monotonic-logit-thresholding-optimization">3. Monotonic Logit Thresholding Optimization</h4>
+<h4 id="monotonic-logit-thresholding-simd-vectorization">3. Monotonic Logit Thresholding + SIMD Vectorization</h4>
 <ul>
-<li>Since <span class="math inline">\sigma(z) = (1 + e^{-z})^{-1}</span> is strictly increasing on <span class="math inline">\mathbb{R}</span>: <span class="math display">\sigma(z) &gt; \tau \iff z &gt; \ln\!\left(\frac{\tau}{1 - \tau}\right)</span></li>
-<li>For <span class="math inline">\tau = 0.5</span>, <span class="math inline">\ln(1) = 0.0\text{f}</span>: thresholding <code>z &gt; 0.0f</code> <strong>eliminates <span class="math inline">51,984</span> <code>std::exp()</code> calls per image</strong>.</li>
+<li>Since <span class="math inline">\sigma(z) &gt; \tau \iff z &gt; \ln(\frac{\tau}{1 - \tau})</span>, <span class="math inline">\tau = 0.5 \implies z &gt; 0.0\text{f}</span>.</li>
+<li>Thresholds raw logits directly via <code>cv::compare(..., CMP_GT)</code> using hardware SIMD vector instructions.</li>
 </ul>
 </div><div class="column" style="width:54%;">
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb5" data-code-line-numbers="1-9|11-18|20-31"><pre class="sourceCode numberSource cpp number-lines code-with-copy"><code class="sourceCode cpp"><span id="cb5-1"><a href></a><span class="co">// src/cpp/src/inference_engine.cpp</span></span>
-<span id="cb5-2"><a href></a><span class="co">// 1. Planar NCHW pointer stride arithmetic + ImageNet Z-score</span></span>
-<span id="cb5-3"><a href></a><span class="dt">float</span><span class="op">*</span> r_plane <span class="op">=</span> input_tensor<span class="op">.</span>data<span class="op">();</span></span>
-<span id="cb5-4"><a href></a><span class="dt">float</span><span class="op">*</span> <span class="va">g_plane</span> <span class="op">=</span> input_tensor<span class="op">.</span>data<span class="op">()</span> <span class="op">+</span> hw<span class="op">;</span></span>
-<span id="cb5-5"><a href></a><span class="dt">float</span><span class="op">*</span> b_plane <span class="op">=</span> input_tensor<span class="op">.</span>data<span class="op">()</span> <span class="op">+</span> <span class="dv">2</span> <span class="op">*</span> hw<span class="op">;</span></span>
-<span id="cb5-6"><a href></a><span class="cf">for</span> <span class="op">(</span><span class="dt">int</span> y <span class="op">=</span> <span class="dv">0</span><span class="op">;</span> y <span class="op">&lt;</span> <span class="va">input_height_</span><span class="op">;</span> <span class="op">++</span>y<span class="op">)</span> <span class="op">{</span></span>
-<span id="cb5-7"><a href></a>    <span class="at">const</span> cv<span class="op">::</span>Vec3f<span class="op">*</span> row_ptr <span class="op">=</span> float_rgb<span class="op">.</span>ptr<span class="op">&lt;</span>cv<span class="op">::</span>Vec3f<span class="op">&gt;(</span>y<span class="op">);</span></span>
-<span id="cb5-8"><a href></a>    <span class="cf">for</span> <span class="op">(</span><span class="dt">int</span> x <span class="op">=</span> <span class="dv">0</span><span class="op">;</span> x <span class="op">&lt;</span> <span class="va">input_width_</span><span class="op">;</span> <span class="op">++</span>x<span class="op">)</span> <span class="op">{</span></span>
-<span id="cb5-9"><a href></a>        <span class="at">const</span> <span class="dt">int</span> idx <span class="op">=</span> y <span class="op">*</span> <span class="va">input_width_</span> <span class="op">+</span> x<span class="op">;</span></span>
-<span id="cb5-10"><a href></a>        r_plane<span class="op">[</span>idx<span class="op">]</span> <span class="op">=</span> <span class="op">(</span>row_ptr<span class="op">[</span>x<span class="op">][</span><span class="dv">0</span><span class="op">]</span> <span class="op">-</span> kImageNetMean<span class="op">[</span><span class="dv">0</span><span class="op">])</span> <span class="op">/</span> kImageNetStd<span class="op">[</span><span class="dv">0</span><span class="op">];</span></span>
-<span id="cb5-11"><a href></a>        <span class="va">g_plane</span><span class="op">[</span>idx<span class="op">]</span> <span class="op">=</span> <span class="op">(</span>row_ptr<span class="op">[</span>x<span class="op">][</span><span class="dv">1</span><span class="op">]</span> <span class="op">-</span> kImageNetMean<span class="op">[</span><span class="dv">1</span><span class="op">])</span> <span class="op">/</span> kImageNetStd<span class="op">[</span><span class="dv">1</span><span class="op">];</span></span>
-<span id="cb5-12"><a href></a>        b_plane<span class="op">[</span>idx<span class="op">]</span> <span class="op">=</span> <span class="op">(</span>row_ptr<span class="op">[</span>x<span class="op">][</span><span class="dv">2</span><span class="op">]</span> <span class="op">-</span> kImageNetMean<span class="op">[</span><span class="dv">2</span><span class="op">])</span> <span class="op">/</span> kImageNetStd<span class="op">[</span><span class="dv">2</span><span class="op">];</span></span>
-<span id="cb5-13"><a href></a>    <span class="op">}</span></span>
-<span id="cb5-14"><a href></a><span class="op">}</span></span>
-<span id="cb5-15"><a href></a></span>
-<span id="cb5-16"><a href></a><span class="co">// 2. Zero-copy Ort::Value tensor binding &amp; session execution</span></span>
-<span id="cb5-17"><a href></a>Ort<span class="op">::</span>Value input_ort <span class="op">=</span> Ort<span class="op">::</span>Value<span class="op">::</span>CreateTensor<span class="op">&lt;</span><span class="dt">float</span><span class="op">&gt;(</span></span>
-<span id="cb5-18"><a href></a>    memory_info<span class="op">,</span> input_data<span class="op">.</span>data<span class="op">(),</span> input_data<span class="op">.</span>size<span class="op">(),</span></span>
-<span id="cb5-19"><a href></a>    input_shape<span class="op">.</span>data<span class="op">(),</span> input_shape<span class="op">.</span>size<span class="op">());</span></span>
-<span id="cb5-20"><a href></a><span class="kw">auto</span> output_tensors <span class="op">=</span> <span class="va">session_</span><span class="op">-&gt;</span>Run<span class="op">(</span></span>
-<span id="cb5-21"><a href></a>    Ort<span class="op">::</span>RunOptions<span class="op">{</span><span class="kw">nullptr</span><span class="op">},</span> input_names<span class="op">,</span> <span class="op">&amp;</span>input_ort<span class="op">,</span> <span class="dv">1</span><span class="op">,</span> output_names<span class="op">,</span> <span class="dv">1</span><span class="op">);</span></span>
-<span id="cb5-22"><a href></a></span>
-<span id="cb5-23"><a href></a><span class="co">// 3. Monotonic logit threshold (z &gt; 0.0f) + OpenCV contour extraction</span></span>
-<span id="cb5-24"><a href></a><span class="at">const</span> <span class="dt">float</span> logit_thresh <span class="op">=</span> <span class="bu">std::</span>log<span class="op">(</span>prob_threshold <span class="op">/</span> <span class="op">(</span><span class="fl">1.0</span><span class="bu">f</span> <span class="op">-</span> prob_threshold<span class="op">));</span></span>
-<span id="cb5-25"><a href></a><span class="cf">for</span> <span class="op">(</span><span class="dt">int</span> y <span class="op">=</span> <span class="dv">0</span><span class="op">;</span> y <span class="op">&lt;</span> out_h<span class="op">;</span> <span class="op">++</span>y<span class="op">)</span> <span class="op">{</span></span>
-<span id="cb5-26"><a href></a>    <span class="ex">uchar</span><span class="op">*</span> mask_row <span class="op">=</span> out_binary_mask<span class="op">.</span>ptr<span class="op">&lt;</span><span class="ex">uchar</span><span class="op">&gt;(</span>y<span class="op">);</span></span>
-<span id="cb5-27"><a href></a>    <span class="cf">for</span> <span class="op">(</span><span class="dt">int</span> x <span class="op">=</span> <span class="dv">0</span><span class="op">;</span> x <span class="op">&lt;</span> out_w<span class="op">;</span> <span class="op">++</span>x<span class="op">)</span></span>
-<span id="cb5-28"><a href></a>        mask_row<span class="op">[</span>x<span class="op">]</span> <span class="op">=</span> <span class="op">(</span>logits<span class="op">[</span>y <span class="op">*</span> out_w <span class="op">+</span> x<span class="op">]</span> <span class="op">&gt;</span> logit_thresh<span class="op">)</span> <span class="op">?</span> <span class="dv">255</span> <span class="op">:</span> <span class="dv">0</span><span class="op">;</span></span>
-<span id="cb5-29"><a href></a><span class="op">}</span></span>
-<span id="cb5-30"><a href></a>cv<span class="op">::</span>findContours<span class="op">(</span>out_binary_mask<span class="op">,</span> contours<span class="op">,</span> cv<span class="op">::</span>RETR_EXTERNAL<span class="op">,</span> cv<span class="op">::</span>CHAIN_APPROX_SIMPLE<span class="op">);</span></span>
-<span id="cb5-31"><a href></a>cv<span class="op">::</span>drawContours<span class="op">(</span>out_contour_overlay<span class="op">,</span> contours<span class="op">,</span> <span class="op">-</span><span class="dv">1</span><span class="op">,</span> cv<span class="op">::</span>Scalar<span class="op">(</span><span class="dv">0</span><span class="op">,</span> <span class="dv">0</span><span class="op">,</span> <span class="dv">255</span><span class="op">),</span> <span class="dv">2</span><span class="op">,</span> cv<span class="op">::</span>LINE_AA<span class="op">);</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb5" data-code-line-numbers="1-8|10-14|16-21"><pre class="sourceCode numberSource cpp number-lines code-with-copy"><code class="sourceCode cpp"><span id="cb5-1"><a href></a><span class="co">// src/cpp/src/inference_engine.cpp</span></span>
+<span id="cb5-2"><a href></a><span class="co">// 1. Fused single-pass BGR uint8 -&gt; planar NCHW + ImageNet FMA</span></span>
+<span id="cb5-3"><a href></a><span class="at">const</span> <span class="dt">uint8_t</span><span class="op">*</span> src <span class="op">=</span> resized_bgr<span class="op">.</span>ptr<span class="op">&lt;</span><span class="dt">uint8_t</span><span class="op">&gt;(</span><span class="dv">0</span><span class="op">);</span></span>
+<span id="cb5-4"><a href></a><span class="cf">for</span> <span class="op">(</span><span class="dt">int</span> i <span class="op">=</span> <span class="dv">0</span><span class="op">;</span> i <span class="op">&lt;</span> hw<span class="op">;</span> <span class="op">++</span>i<span class="op">)</span> <span class="op">{</span></span>
+<span id="cb5-5"><a href></a>    b_plane<span class="op">[</span>i<span class="op">]</span> <span class="op">=</span> <span class="kw">static_cast</span><span class="op">&lt;</span><span class="dt">float</span><span class="op">&gt;(</span>src<span class="op">[</span>i <span class="op">*</span> <span class="dv">3</span> <span class="op">+</span> <span class="dv">0</span><span class="op">])</span> <span class="op">*</span> b_scale <span class="op">+</span> b_bias<span class="op">;</span></span>
+<span id="cb5-6"><a href></a>    <span class="va">g_plane</span><span class="op">[</span>i<span class="op">]</span> <span class="op">=</span> <span class="kw">static_cast</span><span class="op">&lt;</span><span class="dt">float</span><span class="op">&gt;(</span>src<span class="op">[</span>i <span class="op">*</span> <span class="dv">3</span> <span class="op">+</span> <span class="dv">1</span><span class="op">])</span> <span class="op">*</span> <span class="va">g_scale</span> <span class="op">+</span> <span class="va">g_bias</span><span class="op">;</span></span>
+<span id="cb5-7"><a href></a>    r_plane<span class="op">[</span>i<span class="op">]</span> <span class="op">=</span> <span class="kw">static_cast</span><span class="op">&lt;</span><span class="dt">float</span><span class="op">&gt;(</span>src<span class="op">[</span>i <span class="op">*</span> <span class="dv">3</span> <span class="op">+</span> <span class="dv">2</span><span class="op">])</span> <span class="op">*</span> r_scale <span class="op">+</span> r_bias<span class="op">;</span></span>
+<span id="cb5-8"><a href></a><span class="op">}</span></span>
+<span id="cb5-9"><a href></a></span>
+<span id="cb5-10"><a href></a><span class="co">// 2. Persistent Ort::IoBinding &amp; zero-allocation execution</span></span>
+<span id="cb5-11"><a href></a><span class="va">io_binding_</span><span class="op">-&gt;</span>BindInput<span class="op">(</span><span class="va">input_name_</span><span class="op">.</span>c_str<span class="op">(),</span> <span class="va">input_tensor_</span><span class="op">);</span></span>
+<span id="cb5-12"><a href></a><span class="va">io_binding_</span><span class="op">-&gt;</span>BindOutput<span class="op">(</span><span class="va">output_name_</span><span class="op">.</span>c_str<span class="op">(),</span> <span class="va">memory_info_</span><span class="op">);</span></span>
+<span id="cb5-13"><a href></a><span class="va">session_</span><span class="op">-&gt;</span>Run<span class="op">(</span><span class="va">run_options_</span><span class="op">,</span> <span class="op">*</span><span class="va">io_binding_</span><span class="op">);</span></span>
+<span id="cb5-14"><a href></a></span>
+<span id="cb5-15"><a href></a><span class="co">// 3. Monotonic logit threshold (z &gt; 0.0f) via SIMD cv::compare</span></span>
+<span id="cb5-16"><a href></a><span class="at">const</span> cv<span class="op">::</span>Mat logits_mat<span class="op">(</span>out_h<span class="op">,</span> out_w<span class="op">,</span> CV_32FC1<span class="op">,</span> <span class="kw">const_cast</span><span class="op">&lt;</span><span class="dt">float</span><span class="op">*&gt;(</span>logits<span class="op">));</span></span>
+<span id="cb5-17"><a href></a>cv<span class="op">::</span>compare<span class="op">(</span>logits_mat<span class="op">,</span> logit_threshold<span class="op">,</span> out_binary_mask<span class="op">,</span> cv<span class="op">::</span>CMP_GT<span class="op">);</span></span>
+<span id="cb5-18"><a href></a>cv<span class="op">::</span>findContours<span class="op">(</span>out_binary_mask<span class="op">,</span> contours<span class="op">,</span> cv<span class="op">::</span>RETR_EXTERNAL<span class="op">,</span> cv<span class="op">::</span>CHAIN_APPROX_SIMPLE<span class="op">);</span></span>
+<span id="cb5-19"><a href></a>cv<span class="op">::</span>drawContours<span class="op">(</span>out_contour_overlay<span class="op">,</span> contours<span class="op">,</span> <span class="op">-</span><span class="dv">1</span><span class="op">,</span> cv<span class="op">::</span>Scalar<span class="op">(</span><span class="dv">0</span><span class="op">,</span> <span class="dv">0</span><span class="op">,</span> <span class="dv">255</span><span class="op">),</span> <span class="dv">2</span><span class="op">,</span> cv<span class="op">::</span>LINE_AA<span class="op">);</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </div></div>
 <aside class="notes">
 <p>Walk through the three systems optimizations in <code>inference_engine.cpp</code>: (1) contiguous planar NCHW layout for cache-friendly SIMD loads, (2) zero-copy tensor wrapping via <code>Ort::Value::CreateTensor</code>, and (3) avoiding 51,984 transcendental <code>std::exp()</code> calls by thresholding raw logits directly at <code>0.0f</code>.</p>
@@ -1728,18 +1716,18 @@ display:block!important;
 <td style="text-align: center;">—</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><strong>Epoch 02 (Train)</strong></td>
-<td style="text-align: center;"><code>0.1471</code></td>
-<td style="text-align: center;"><code>0.9494</code></td>
-<td style="text-align: center;">—</td>
-<td style="text-align: center;">—</td>
+<td style="text-align: left;"><strong>Epoch 02 (Val)</strong></td>
+<td style="text-align: center;"><code>0.1262</code></td>
+<td style="text-align: center;"><code>0.9475</code></td>
+<td style="text-align: center;"><code>0.9050</code></td>
+<td style="text-align: center;"><code>0.9660</code></td>
 </tr>
 <tr class="odd">
 <td style="text-align: left;"><strong>Final Test (<code>data/test</code>)</strong></td>
-<td style="text-align: center;"><strong><code>0.1262</code></strong></td>
-<td style="text-align: center;"><strong><code>0.9475</code></strong></td>
-<td style="text-align: center;"><strong><code>0.9050</code></strong></td>
-<td style="text-align: center;"><strong><code>0.9660</code></strong></td>
+<td style="text-align: center;"><strong><code>0.0644</code></strong></td>
+<td style="text-align: center;"><strong><code>0.9655</code></strong></td>
+<td style="text-align: center;"><strong><code>0.9344</code></strong></td>
+<td style="text-align: center;"><strong><code>0.9766</code></strong></td>
 </tr>
 </tbody>
 </table>
@@ -1763,7 +1751,7 @@ display:block!important;
 </div>
 </div></div>
 <aside class="notes">
-<p>Point to the empirical metrics table—achieving a 0.9475 Dice score and 0.9050 IoU on the 159-image test split—and walk the interviewer through the 4-column visual comparison plot showing sub-pixel contour agreement as well as honest engineering analysis of touching cells.</p>
+<p>Point to the empirical metrics table—achieving a 0.9655 Dice score and 0.9344 IoU on the 159-image test split—and walk the interviewer through the 4-column visual comparison plot showing sub-pixel contour agreement as well as honest engineering analysis of touching cells.</p>
 <style type="text/css">
 span.MJX_Assistive_MathML {
 position:absolute!important;

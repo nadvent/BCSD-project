@@ -7,6 +7,7 @@ from typing import cast
 
 import torch
 import torch.nn as nn
+from config_utils import load_config
 from dataset import VisionDataset
 from evaluate import (
     BCEDiceLoss,
@@ -89,51 +90,91 @@ def train_one_epoch(
 
 
 def main() -> None:
+    # 0. Check for optional --config argument before full parsing
+    conf_parser = argparse.ArgumentParser(add_help=False)
+    conf_parser.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        help="Path to YAML configuration file.",
+    )
+    conf_args, _ = conf_parser.parse_known_args()
+
+    cfg = load_config(conf_args.config)
+    cfg_data = cfg.get("data", {})
+    cfg_model = cfg.get("model", {})
+    cfg_train = cfg.get("training", {})
+
     parser = argparse.ArgumentParser(
-        description="Train U-Net on the Blood Cell Segmentation Dataset."
+        description="Train U-Net on the Blood Cell Segmentation Dataset.",
+        parents=[conf_parser],
     )
     _ = parser.add_argument(
         "--train_dir",
         type=str,
-        default="./data/train",
+        default=cfg_data.get("train_dir", "./data/train"),
         help="Path to training dataset directory.",
     )
     _ = parser.add_argument(
         "--val_dir",
         type=str,
-        default="./data/test",
+        default=cfg_data.get("val_dir", "./data/test"),
         help="Path to validation/test dataset directory.",
     )
     _ = parser.add_argument(
         "--output_dir",
         type=str,
-        default="./outputs",
+        default=cfg_train.get("output_dir", "./outputs"),
         help="Directory to save model checkpoints.",
     )
     _ = parser.add_argument(
         "--epochs",
         type=int,
-        default=20,
+        default=int(cfg_train.get("epochs", 20)),
         help="Number of training epochs.",
     )
     _ = parser.add_argument(
         "--batch_size",
         type=int,
-        default=4,
+        default=int(cfg_train.get("batch_size", 4)),
         help="Mini-batch size.",
     )
     _ = parser.add_argument(
         "--lr",
         type=float,
-        default=1e-4,
+        default=float(cfg_train.get("learning_rate", 1e-4)),
         help="Initial learning rate for AdamW.",
+    )
+    _ = parser.add_argument(
+        "--weight_decay",
+        type=float,
+        default=float(cfg_train.get("weight_decay", 1e-4)),
+        help="Weight decay for AdamW.",
+    )
+    _ = parser.add_argument(
+        "--bce_weight",
+        type=float,
+        default=float(cfg_train.get("bce_weight", 0.5)),
+        help="Weight assigned to BCE in combined loss (remainder goes to Soft Dice).",
     )
     _ = parser.add_argument(
         "--padding",
         type=int,
-        default=0,
+        default=int(cfg_model.get("padding", 0)),
         choices=[0, 1],
         help="Convolution padding in U-Net (0=unpadded 228x228 output, 1=padded 416x416 output).",
+    )
+    _ = parser.add_argument(
+        "--height",
+        type=int,
+        default=int(cfg_data.get("input_height", 416)),
+        help="Input image height.",
+    )
+    _ = parser.add_argument(
+        "--width",
+        type=int,
+        default=int(cfg_data.get("input_width", 416)),
+        help="Input image width.",
     )
     args = parser.parse_args()
 
@@ -143,15 +184,29 @@ def main() -> None:
     epochs = cast(int, args.epochs)
     batch_size = cast(int, args.batch_size)
     learning_rate = cast(float, args.lr)
+    weight_decay = cast(float, args.weight_decay)
+    bce_weight = cast(float, args.bce_weight)
     padding = cast(int, args.padding)
+    input_height = cast(int, args.height)
+    input_width = cast(int, args.width)
 
     output_dir.mkdir(parents=True, exist_ok=True)
     device: torch.device = select_device()
     print(f"Using compute device: {device}")
 
     # 1. Initialize Datasets and DataLoaders
-    train_dataset = VisionDataset(data_dir=train_dir, is_train=True)
-    val_dataset = VisionDataset(data_dir=val_dir, is_train=False)
+    train_dataset = VisionDataset(
+        data_dir=train_dir,
+        is_train=True,
+        input_height=input_height,
+        input_width=input_width,
+    )
+    val_dataset = VisionDataset(
+        data_dir=val_dir,
+        is_train=False,
+        input_height=input_height,
+        input_width=input_width,
+    )
 
     use_pin_memory: bool = device.type == "cuda"
     train_loader: DataLoader[tuple[torch.Tensor, torch.Tensor]] = DataLoader(
@@ -173,8 +228,8 @@ def main() -> None:
 
     # 2. Initialize Model, Loss, Optimizer, and Scheduler
     model = UNet(in_channels=3, out_channels=1, padding=padding).to(device)
-    criterion = BCEDiceLoss(bce_weight=0.5)
-    optimizer = AdamW(model.parameters(), lr=learning_rate, weight_decay=1e-4)
+    criterion = BCEDiceLoss(bce_weight=bce_weight)
+    optimizer = AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
     scheduler = ReduceLROnPlateau(
         optimizer,
         mode="max",

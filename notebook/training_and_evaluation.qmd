@@ -21,14 +21,14 @@ execute:
 
 This report documents the training dynamics, optimization design, and quantitative evaluation of our from-scratch **U-Net** architecture on the **Blood Cell Segmentation Dataset (BCCD)**. 
 
-Using a combined **Binary Cross-Entropy (BCE) and Soft Dice Loss** alongside synchronized spatial augmentations, the model achieved state-of-the-art segmentation convergence within only two epochs:
+Using a combined **Binary Cross-Entropy (BCE) and Soft Dice Loss** alongside synchronized spatial augmentations, the model achieves state-of-the-art segmentation performance across 20 training epochs:
 
 | Metric | Benchmark Result (`data/test` — 159 samples) | Target Standard | Status |
 | :--- | :--- | :--- | :--- |
-| **Combined Loss** | **0.1262** | $< 0.2000$ | **Passed** |
-| **Dice Score ($F_1$)** | **0.9475** ($94.75\%$) | $> 0.8500$ | **Exceptional** |
-| **IoU (Jaccard Index)** | **0.9050** ($90.50\%$) | $> 0.8000$ | **Exceptional** |
-| **Pixel Accuracy** | **0.9660** ($96.60\%$) | $> 0.9000$ | **Passed** |
+| **Combined Loss** | **0.0644** | $< 0.1000$ | **Passed** |
+| **Dice Score ($F_1$)** | **0.9655** ($96.55\%$) | $> 0.9000$ | **Exceptional** |
+| **IoU (Jaccard Index)** | **0.9344** ($93.44\%$) | $> 0.8500$ | **Exceptional** |
+| **Pixel Accuracy** | **0.9766** ($97.66\%$) | $> 0.9500$ | **Passed** |
 
 ---
 
@@ -117,7 +117,6 @@ from torch.utils.data import DataLoader
 # Resolve project paths
 project_root = Path.cwd().parent
 sys.path.insert(0, str(project_root / "src" / "python"))
-sys.path.insert(0, str(project_root / "src" / "python_pl"))
 
 from dataset import VisionDataset
 from model import UNet
@@ -236,7 +235,7 @@ plt.show()
 
 The PyTorch training pipeline has fulfilled all validation objectives:
 
-* **Quantitative**: $94.75\%$ Dice score and $90.50\%$ IoU on the holdout test set.
+* **Quantitative**: $96.55\%$ Dice score ($F_1$) and $93.44\%$ IoU on the holdout test set across 20 training epochs.
 * **Qualitative**: Smooth, continuous cell membrane contours with zero background noise.
 * **Engineering**: Verified model checkpoint saved at `outputs/best_model.pth`.
 

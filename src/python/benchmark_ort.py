@@ -1,11 +1,13 @@
+from __future__ import annotations
+
 import argparse
 import os
 import time
-from typing import Dict, List, Tuple
+from typing import cast
 
 import cv2
 import numpy as np
-import onnxruntime as ort
+import onnxruntime as ort  # pyright: ignore[reportMissingTypeStubs]
 
 try:
     import torch
@@ -15,13 +17,13 @@ except ImportError:
     HAS_TORCH = False
 
 
-def sync_cuda(is_cuda: bool):
+def sync_cuda(is_cuda: bool) -> None:
     """Synchronize CUDA GPU stream to guarantee exact timing without async skew."""
     if is_cuda and HAS_TORCH and torch.cuda.is_available():
         torch.cuda.synchronize()
 
 
-def compute_stats(timings: List[double] if False else List[float]) -> Dict[str, float]:
+def compute_stats(timings: list[float]) -> dict[str, float]:
     """Compute statistical percentiles from a series of execution latencies in ms."""
     arr = np.array(timings, dtype=np.float64)
     return {
@@ -36,7 +38,7 @@ def compute_stats(timings: List[double] if False else List[float]) -> Dict[str, 
 
 def create_ort_session(
     model_path: str, device: str = "auto", num_threads: int = 8
-) -> Tuple[ort.InferenceSession, str]:
+) -> tuple[ort.InferenceSession, str]:
     """Initialize ONNX Runtime InferenceSession matching C++ session options."""
     sess_opts = ort.SessionOptions()
     sess_opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
@@ -46,8 +48,8 @@ def create_ort_session(
     sess_opts.enable_mem_pattern = True
     sess_opts.add_session_config_entry("session.intra_op.allow_spinning", "1")
 
-    available_eps = ort.get_available_providers()
-    dev = device.lower()
+    available_eps: list[str] = ort.get_available_providers()
+    dev: str = device.lower()
 
     if dev in ("cuda", "auto") and "CUDAExecutionProvider" in available_eps:
         # Preload cuDNN 9 sub-libraries if running on Linux
@@ -55,7 +57,7 @@ def create_ort_session(
             import ctypes
 
             for lib in ("libcudnn_ops.so.9", "libcudnn_cnn.so.9", "libcudnn_graph.so.9"):
-                ctypes.CDLL(lib, mode=ctypes.RTLD_GLOBAL)
+                _ = ctypes.CDLL(lib, mode=ctypes.RTLD_GLOBAL)
         except Exception:
             pass
 
@@ -71,7 +73,7 @@ def create_ort_session(
         providers = ["CPUExecutionProvider"]
 
     session = ort.InferenceSession(model_path, sess_opts, providers=providers)
-    active_ep = session.get_providers()[0]
+    active_ep = cast(str, session.get_providers()[0])
     return session, active_ep
 
 
@@ -82,7 +84,7 @@ def run_benchmark(
     runs: int,
     warmup: int,
     num_threads: int,
-):
+) -> None:
     if not os.path.exists(model_path):
         raise FileNotFoundError(f"Model path does not exist: {model_path}")
     if not os.path.exists(image_path):
@@ -96,8 +98,8 @@ def run_benchmark(
     is_cuda = active_ep == "CUDAExecutionProvider"
 
     input_meta = session.get_inputs()[0]
-    input_name = input_meta.name
-    output_name = session.get_outputs()[0].name
+    input_name: str = input_meta.name
+    output_name: str = session.get_outputs()[0].name
 
     shape = input_meta.shape
     in_h = shape[2] if len(shape) == 4 and isinstance(shape[2], int) and shape[2] > 0 else 416
@@ -126,7 +128,7 @@ def run_benchmark(
         _ = session.run([output_name], ort_feed)
     sync_cuda(is_cuda)
 
-    tier1_timings = []
+    tier1_timings: list[float] = []
     for _ in range(runs):
         t0 = time.perf_counter()
         _ = session.run([output_name], ort_feed)
@@ -144,7 +146,7 @@ def run_benchmark(
     mean = np.array([0.485, 0.456, 0.406], dtype=np.float32).reshape(1, 1, 3)
     std = np.array([0.229, 0.224, 0.225], dtype=np.float32).reshape(1, 1, 3)
 
-    def pipeline_step():
+    def pipeline_step() -> tuple[float, float, float, float]:
         # Preprocessing
         t_pre0 = time.perf_counter()
         if bgr_image.shape[0] == in_h and bgr_image.shape[1] == in_w:
@@ -166,7 +168,7 @@ def run_benchmark(
 
         # Postprocessing
         t_post0 = time.perf_counter()
-        logits = outputs[0][0, 0]
+        logits: np.ndarray = outputs[0][0, 0]
         out_h, out_w = logits.shape
         mask = (logits > 0.0).astype(np.uint8) * 255
 
@@ -189,7 +191,10 @@ def run_benchmark(
         _ = pipeline_step()
     sync_cuda(is_cuda)
 
-    pre_times, inf_times, post_times, tot_times = [], [], [], []
+    pre_times: list[float] = []
+    inf_times: list[float] = []
+    post_times: list[float] = []
+    tot_times: list[float] = []
     for _ in range(runs):
         p_ms, i_ms, pos_ms, tot_ms = pipeline_step()
         pre_times.append(p_ms)
@@ -230,7 +235,7 @@ def run_benchmark(
     print("======================================================================\n")
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="Python ONNX Runtime Systems Benchmark",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,

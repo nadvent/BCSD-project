@@ -7,7 +7,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
 
 <meta name="author" content="Vision ML Project">
-<meta name="dcterms.date" content="2026-10-18">
+<meta name="dcterms.date" content="2026-10-27">
 
 <title>C++ ONNX Runtime Inference Engine &amp; Project Conclusions</title>
 <style>
@@ -123,7 +123,7 @@ window.Quarto = {
   <ul class="collapse">
   <li><a href="#static-onnx-graph-constant-folding" id="toc-static-onnx-graph-constant-folding" class="nav-link" data-scroll-target="#static-onnx-graph-constant-folding"><span class="header-section-number">2.1</span> 1. Static ONNX Graph &amp; Constant Folding</a></li>
   <li><a href="#memory-layout-transformation-interleaved-textbgr_texthwc-to-planar-textrgb_textnchw" id="toc-memory-layout-transformation-interleaved-textbgr_texthwc-to-planar-textrgb_textnchw" class="nav-link" data-scroll-target="#memory-layout-transformation-interleaved-textbgr_texthwc-to-planar-textrgb_textnchw"><span class="header-section-number">2.2</span> 2. Memory Layout Transformation: Interleaved <span class="math inline">\(\text{BGR}_{\text{HWC}} \to\)</span> Planar <span class="math inline">\(\text{RGB}_{\text{NCHW}}\)</span></a></li>
-  <li><a href="#zero-copy-tensor-binding" id="toc-zero-copy-tensor-binding" class="nav-link" data-scroll-target="#zero-copy-tensor-binding"><span class="header-section-number">2.3</span> 3. Zero-Copy Tensor Binding</a></li>
+  <li><a href="#zero-copy-persistent-tensor-binding-ortiobinding" id="toc-zero-copy-persistent-tensor-binding-ortiobinding" class="nav-link" data-scroll-target="#zero-copy-persistent-tensor-binding-ortiobinding"><span class="header-section-number">2.3</span> 3. Zero-Copy Persistent Tensor Binding (<code>Ort::IoBinding</code>)</a></li>
   <li><a href="#mathematical-postprocessing-shortcut-eliminating-51984-stdexp-calls" id="toc-mathematical-postprocessing-shortcut-eliminating-51984-stdexp-calls" class="nav-link" data-scroll-target="#mathematical-postprocessing-shortcut-eliminating-51984-stdexp-calls"><span class="header-section-number">2.4</span> 4. Mathematical Postprocessing Shortcut: Eliminating <span class="math inline">\(51,984\)</span> <code>std::exp()</code> Calls</a></li>
   </ul></li>
   <li><a href="#running-c-in-quarto-xeus-cling-vs.-compiled-binary-integration" id="toc-running-c-in-quarto-xeus-cling-vs.-compiled-binary-integration" class="nav-link" data-scroll-target="#running-c-in-quarto-xeus-cling-vs.-compiled-binary-integration"><span class="header-section-number">3</span> Running C++ in Quarto: <code>xeus-cling</code> vs.&nbsp;Compiled Binary Integration</a>
@@ -166,7 +166,7 @@ window.Quarto = {
     <div>
     <div class="quarto-title-meta-heading">Published</div>
     <div class="quarto-title-meta-contents">
-      <p class="date">October 18, 2026</p>
+      <p class="date">October 27, 2026</p>
     </div>
   </div>
   
@@ -214,8 +214,8 @@ window.Quarto = {
 <tr class="odd">
 <td style="text-align: left;"><strong>3. Training &amp; Validation</strong></td>
 <td style="text-align: left;"><code>src/python/train.py</code>, <code>evaluate.py</code></td>
-<td style="text-align: left;"><strong>Dice: <span class="math inline">\(0.9475\)</span></strong> | <strong>IoU: <span class="math inline">\(0.9050\)</span></strong> | <strong>Acc: <span class="math inline">\(0.9660\)</span></strong></td>
-<td style="text-align: left;">Converged in 2 epochs via Combined BCE + Soft Dice Loss</td>
+<td style="text-align: left;"><strong>Dice: <span class="math inline">\(0.9655\)</span></strong> | <strong>IoU: <span class="math inline">\(0.9344\)</span></strong> | <strong>Acc: <span class="math inline">\(0.9766\)</span></strong></td>
+<td style="text-align: left;">20 epochs via Combined BCE + Soft Dice Loss</td>
 </tr>
 <tr class="even">
 <td style="text-align: left;"><strong>4. Graph Serialization</strong></td>
@@ -226,8 +226,8 @@ window.Quarto = {
 <tr class="odd">
 <td style="text-align: left;"><strong>5. C++ Engine</strong></td>
 <td style="text-align: left;"><code>src/cpp/inference_app</code></td>
-<td style="text-align: left;">Zero-copy NCHW tensor binding</td>
-<td style="text-align: left;">Logit-threshold optimization (<span class="math inline">\(\sigma(z)&gt;0.5 \iff z&gt;0\)</span>)</td>
+<td style="text-align: left;"><strong>Throughput: <span class="math inline">\(28.57\text{ FPS}\)</span></strong> (E2E)</td>
+<td style="text-align: left;">Fused FMA, <code>Ort::IoBinding</code>, SIMD logit thresholding</td>
 </tr>
 </tbody>
 </table>
@@ -252,22 +252,18 @@ window.Quarto = {
 <li><strong>OpenCV (<code>cv::Mat</code>)</strong> loads images in <strong>BGR</strong> channel order with <strong>interleaved pixels</strong> (<span class="math inline">\(\text{HWC}\)</span>): <span class="math display">\[\text{Memory Address: } [B_{0,0}, G_{0,0}, R_{0,0}, \; B_{0,1}, G_{0,1}, R_{0,1}, \dots]\]</span></li>
 <li><strong>ONNX Runtime (<code>input</code> tensor)</strong> expects <strong>RGB</strong> channel order stored in <strong>contiguous planar blocks</strong> (<span class="math inline">\(\text{NCHW}\)</span>): <span class="math display">\[\text{Memory Address: } [\underbrace{R_{0,0}, R_{0,1}, \dots}_{\text{Plane 0 }(416\times 416)}, \; \underbrace{G_{0,0}, G_{0,1}, \dots}_{\text{Plane 1 }(416\times 416)}, \; \underbrace{B_{0,0}, B_{0,1}, \dots}_{\text{Plane 2 }(416\times 416)}]\]</span></li>
 </ul>
-<p>In <code>SegmentationEngine::preprocess()</code>, we resize the input image to <span class="math inline">\(416 \times 416\)</span>, convert <span class="math inline">\(\text{BGR} \to \text{RGB}\)</span>, scale intensities to <span class="math inline">\([0.0, 1.0]\)</span>, and use three pointer offsets (<code>r_plane</code>, <code>g_plane</code>, <code>b_plane</code> separated by <span class="math inline">\(H \times W = 173,056\)</span> floats) to transpose and apply ImageNet normalization in a single loop.</p>
+<p>In <code>SegmentationEngine::preprocess_into()</code>, we resize the input image to <span class="math inline">\(416 \times 416\)</span> and perform a fused single-pass BGR <span class="math inline">\(\to\)</span> planar RGB transformation directly into a pre-allocated contiguous buffer. Instead of dynamic allocations, precomputed fused multiply-add (FMA) scaling factors apply ImageNet normalization in a single pass: <span class="math display">\[P_{\text{norm}} = P \cdot \text{scale} + \text{bias}, \quad \text{scale} = \frac{1}{255 \cdot \sigma}, \quad \text{bias} = -\frac{\mu}{\sigma}\]</span></p>
 </section>
-<section id="zero-copy-tensor-binding" class="level3" data-number="2.3">
-<h3 data-number="2.3" class="anchored" data-anchor-id="zero-copy-tensor-binding"><span class="header-section-number">2.3</span> 3. Zero-Copy Tensor Binding</h3>
-<p>Rather than copying the preprocessed <code>std::vector&lt;float&gt;</code> into a separate runtime buffer, <code>SegmentationEngine::predict()</code> binds the vector’s underlying heap pointer (<code>input_data.data()</code>) directly into an <code>Ort::Value</code> tensor:</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb1"><pre class="sourceCode cpp code-with-copy"><code class="sourceCode cpp"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a>Ort<span class="op">::</span>MemoryInfo memory_info <span class="op">=</span> Ort<span class="op">::</span>MemoryInfo<span class="op">::</span>CreateCpu<span class="op">(</span></span>
-<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a>    OrtArenaAllocator<span class="op">,</span> OrtMemTypeDefault</span>
-<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="op">);</span></span>
+<section id="zero-copy-persistent-tensor-binding-ortiobinding" class="level3" data-number="2.3">
+<h3 data-number="2.3" class="anchored" data-anchor-id="zero-copy-persistent-tensor-binding-ortiobinding"><span class="header-section-number">2.3</span> 3. Zero-Copy Persistent Tensor Binding (<code>Ort::IoBinding</code>)</h3>
+<p>Rather than reallocating input tensors per frame, <code>SegmentationEngine</code> binds a persistent <code>Ort::Value</code> memory tensor backed by CPU arena memory directly to the session’s input and output via <code>Ort::IoBinding</code>:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb1"><pre class="sourceCode cpp code-with-copy"><code class="sourceCode cpp"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="va">input_tensor_</span> <span class="op">=</span> Ort<span class="op">::</span>Value<span class="op">::</span>CreateTensor<span class="op">&lt;</span><span class="dt">float</span><span class="op">&gt;(</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a>    <span class="va">memory_info_</span><span class="op">,</span> <span class="va">input_buffer_</span><span class="op">.</span>data<span class="op">(),</span> <span class="va">input_buffer_</span><span class="op">.</span>size<span class="op">(),</span></span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a>    <span class="va">input_shape_</span><span class="op">.</span>data<span class="op">(),</span> <span class="va">input_shape_</span><span class="op">.</span>size<span class="op">());</span></span>
 <span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a>Ort<span class="op">::</span>Value input_tensor <span class="op">=</span> Ort<span class="op">::</span>Value<span class="op">::</span>CreateTensor<span class="op">&lt;</span><span class="dt">float</span><span class="op">&gt;(</span></span>
-<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a>    memory_info<span class="op">,</span></span>
-<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a>    input_data<span class="op">.</span>data<span class="op">(),</span></span>
-<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a>    input_data<span class="op">.</span>size<span class="op">(),</span></span>
-<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a>    input_shape<span class="op">.</span>data<span class="op">(),</span></span>
-<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a>    input_shape<span class="op">.</span>size<span class="op">()</span></span>
-<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a><span class="op">);</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a><span class="va">io_binding_</span> <span class="op">=</span> <span class="bu">std::</span>make_unique<span class="op">&lt;</span>Ort<span class="op">::</span>IoBinding<span class="op">&gt;(*</span><span class="va">session_</span><span class="op">);</span></span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a><span class="va">io_binding_</span><span class="op">-&gt;</span>BindInput<span class="op">(</span><span class="va">input_name_</span><span class="op">.</span>c_str<span class="op">(),</span> <span class="va">input_tensor_</span><span class="op">);</span></span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a><span class="va">io_binding_</span><span class="op">-&gt;</span>BindOutput<span class="op">(</span><span class="va">output_name_</span><span class="op">.</span>c_str<span class="op">(),</span> <span class="va">memory_info_</span><span class="op">);</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </section>
 <section id="mathematical-postprocessing-shortcut-eliminating-51984-stdexp-calls" class="level3" data-number="2.4">
 <h3 data-number="2.4" class="anchored" data-anchor-id="mathematical-postprocessing-shortcut-eliminating-51984-stdexp-calls"><span class="header-section-number">2.4</span> 4. Mathematical Postprocessing Shortcut: Eliminating <span class="math inline">\(51,984\)</span> <code>std::exp()</code> Calls</h3>
@@ -275,7 +271,7 @@ window.Quarto = {
 <p><span class="math display">\[\sigma(z) = \frac{1}{1 + e^{-z}} &gt; p\]</span></p>
 <p>Evaluating <code>std::exp(-z)</code> across <span class="math inline">\(228 \times 228 = 51,984\)</span> pixels adds unnecessary CPU overhead. Because <span class="math inline">\(\sigma(z)\)</span> is strictly monotonically increasing on <span class="math inline">\(\mathbb{R}\)</span>, we invert the inequality analytically once prior to the loop:</p>
 <p><span class="math display">\[\frac{1}{1 + e^{-z}} &gt; p \iff z &gt; \ln\!\left(\frac{p}{1 - p}\right)\]</span></p>
-<p>For our standard threshold <span class="math inline">\(p = 0.5\)</span>, <span class="math inline">\(\ln(0.5 / 0.5) = \ln(1) = 0.0\text{f}\)</span>. Thus, checking <code>z &gt; 0.0f</code> produces the <strong>exact same binary mask</strong> using a single floating-point comparison instruction (<code>ucomiss</code>) per pixel.</p>
+<p>For our standard threshold <span class="math inline">\(p = 0.5\)</span>, <span class="math inline">\(\ln(0.5 / 0.5) = \ln(1) = 0.0\text{f}\)</span>. Thus, checking <code>z &gt; 0.0f</code> produces the <strong>exact same binary mask</strong>. Furthermore, wrapping the raw logit pointer in a zero-copy <code>cv::Mat</code> header and invoking <code>cv::compare(logits_mat, logit_threshold, out_binary_mask, cv::CMP_GT)</code> thresholds all 51,984 pixels using hardware SIMD vector instructions.</p>
 <hr>
 </section>
 </section>
@@ -344,7 +340,10 @@ window.Quarto = {
 <pre><code>Loading ONNX model from: /home/nazhanys/Documents/Work/bcsd/outputs/model.onnx
 --------------------------------------------------
 C++ ONNX Runtime Inference Complete!
-  Forward Pass Latency : 303.279 ms
+  Execution Provider   : CUDAExecutionProvider
+  Input Dimensions     : 1944x1383
+  Model Target Res     : 416x416
+  Forward Pass Latency : 51.1953 ms
   Output Mask Size     : 228x228
   Saved Binary Mask    : /home/nazhanys/Documents/Work/bcsd/outputs/cpp_sample_1_mask.png
   Saved Contour Overlay: /home/nazhanys/Documents/Work/bcsd/outputs/cpp_sample_1_overlay.png
@@ -353,7 +352,10 @@ C++ ONNX Runtime Inference Complete!
 Loading ONNX model from: /home/nazhanys/Documents/Work/bcsd/outputs/model.onnx
 --------------------------------------------------
 C++ ONNX Runtime Inference Complete!
-  Forward Pass Latency : 306.868 ms
+  Execution Provider   : CUDAExecutionProvider
+  Input Dimensions     : 1600x1200
+  Model Target Res     : 416x416
+  Forward Pass Latency : 49.6655 ms
   Output Mask Size     : 228x228
   Saved Binary Mask    : /home/nazhanys/Documents/Work/bcsd/outputs/cpp_sample_2_mask.png
   Saved Contour Overlay: /home/nazhanys/Documents/Work/bcsd/outputs/cpp_sample_2_overlay.png
@@ -362,7 +364,10 @@ C++ ONNX Runtime Inference Complete!
 Loading ONNX model from: /home/nazhanys/Documents/Work/bcsd/outputs/model.onnx
 --------------------------------------------------
 C++ ONNX Runtime Inference Complete!
-  Forward Pass Latency : 303.521 ms
+  Execution Provider   : CUDAExecutionProvider
+  Input Dimensions     : 1600x1200
+  Model Target Res     : 416x416
+  Forward Pass Latency : 49.6736 ms
   Output Mask Size     : 228x228
   Saved Binary Mask    : /home/nazhanys/Documents/Work/bcsd/outputs/cpp_sample_3_mask.png
   Saved Contour Overlay: /home/nazhanys/Documents/Work/bcsd/outputs/cpp_sample_3_overlay.png
@@ -457,7 +462,7 @@ Figure&nbsp;1: End-to-End C++ Inference Verification: Input Blood Smear, Ground 
 <h3 data-number="5.1" class="anchored" data-anchor-id="mathematical-architectural-takeaways"><span class="header-section-number">5.1</span> 1. Mathematical &amp; Architectural Takeaways</h3>
 <ul>
 <li><strong>Unpadded U-Net &amp; Skip Cropping</strong>: Building the original 2015 unpadded U-Net (<code>padding=0</code>) from scratch demonstrated how <span class="math inline">\(3 \times 3\)</span> convolutions reduce spatial resolution by <span class="math inline">\(2\)</span> pixels per layer (<span class="math inline">\(416 \times 416 \to 228 \times 228\)</span>), requiring exact center-cropping (<code>_center_crop</code>) across all four skip connections and target masks.</li>
-<li><strong>Synergy of Combined BCE + Soft Dice Loss</strong>: Pairing <code>nn.BCEWithLogitsLoss</code> (using the log-sum-exp trick for floating-point stability) with differentiable Soft Dice Loss resolved foreground-to-background class imbalance, achieving a <strong><span class="math inline">\(94.75\%\)</span> Dice Score</strong> and <strong><span class="math inline">\(90.50\%\)</span> IoU</strong> within just 2 epochs.</li>
+<li><strong>Synergy of Combined BCE + Soft Dice Loss</strong>: Pairing <code>nn.BCEWithLogitsLoss</code> (using the log-sum-exp trick for floating-point stability) with differentiable Soft Dice Loss resolved foreground-to-background class imbalance, achieving a <strong><span class="math inline">\(96.55\%\)</span> Dice Score</strong> and <strong><span class="math inline">\(93.44\%\)</span> IoU</strong> on the holdout test set.</li>
 <li><strong>Lossless Graph Portability</strong>: Exporting to ONNX with constant folding absorbed all <code>BatchNorm2d</code> layers into their preceding <code>Conv2d</code> weights, achieving a <span class="math inline">\(2.42 \times 10^{-6}\)</span> parity difference between Python and C++.</li>
 </ul>
 </section>

@@ -1,13 +1,22 @@
+from __future__ import annotations
+
 import time
+from collections.abc import Callable
+from typing import Any, cast
 
 import numpy as np
-import onnxruntime as ort
+import onnxruntime as ort  # pyright: ignore[reportMissingTypeStubs]
 import torch
-
 from model import UNet
 
 
-def benchmark_fn(fn, warmup=25, runs=100, sync_cuda=True):
+def benchmark_fn(
+    fn: Callable[[], Any],
+    warmup: int = 25,
+    runs: int = 100,
+    sync_cuda: bool = True,
+) -> dict[str, float]:
+    """Measures steady-state execution time of a callable function."""
     # 1. Warmup passes
     for _ in range(warmup):
         _ = fn()
@@ -15,7 +24,7 @@ def benchmark_fn(fn, warmup=25, runs=100, sync_cuda=True):
         torch.cuda.synchronize()
 
     # 2. Timed benchmark passes
-    timings = []
+    timings: list[float] = []
     for _ in range(runs):
         start = time.perf_counter()
         _ = fn()
@@ -24,25 +33,27 @@ def benchmark_fn(fn, warmup=25, runs=100, sync_cuda=True):
         end = time.perf_counter()
         timings.append((end - start) * 1000.0)  # to ms
 
+    arr = np.array(timings, dtype=np.float64)
     return {
-        "p50": np.percentile(timings, 50),
-        "mean": np.mean(timings),
-        "p95": np.percentile(timings, 95),
-        "std": np.std(timings),
+        "p50": float(np.percentile(arr, 50)),
+        "mean": float(np.mean(arr)),
+        "p95": float(np.percentile(arr, 95)),
+        "std": float(np.std(arr)),
     }
 
 
-def main():
+def main() -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(
         f"Benchmarking on: {device} ({torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'})\n"
     )
 
     input_tensor = torch.randn(1, 3, 416, 416, device=device)
-    input_np = input_tensor.detach().cpu().numpy()
+    input_np: np.ndarray = input_tensor.detach().cpu().numpy()
 
     # --- 1. PyTorch Eager Mode ---
-    model_eager = UNet(in_channels=3, out_channels=1, padding=0).to(device).eval()
+    model_eager = UNet(in_channels=3, out_channels=1, padding=0).to(device)
+    _ = model_eager.eval()
     with torch.no_grad():
         eager_stats = benchmark_fn(lambda: model_eager(input_tensor))
 

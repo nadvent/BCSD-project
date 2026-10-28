@@ -7,7 +7,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
 
 <meta name="author" content="Vision ML Project">
-<meta name="dcterms.date" content="2026-10-18">
+<meta name="dcterms.date" content="2026-10-27">
 
 <title>Blood Cell Semantic Segmentation: Training &amp; Evaluation Report</title>
 <style>
@@ -82,17 +82,17 @@ div.csl-indent {
 }</style>
 
 
-<script src="training_and_evalutation_files/libs/clipboard/clipboard.min.js"></script>
-<script src="training_and_evalutation_files/libs/quarto-html/quarto.js" type="module"></script>
-<script src="training_and_evalutation_files/libs/quarto-html/tabsets/tabsets.js" type="module"></script>
-<script src="training_and_evalutation_files/libs/quarto-html/popper.min.js"></script>
-<script src="training_and_evalutation_files/libs/quarto-html/tippy.umd.min.js"></script>
-<script src="training_and_evalutation_files/libs/quarto-html/anchor.min.js"></script>
-<link href="training_and_evalutation_files/libs/quarto-html/tippy.css" rel="stylesheet">
-<link href="training_and_evalutation_files/libs/quarto-html/quarto-syntax-highlighting-7f8f88aac4f3542376d5c11b86a4c14d.css" rel="stylesheet" id="quarto-text-highlighting-styles">
-<script src="training_and_evalutation_files/libs/bootstrap/bootstrap.min.js"></script>
-<link href="training_and_evalutation_files/libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
-<link href="training_and_evalutation_files/libs/bootstrap/bootstrap-67270d1595a62d14f123c043d4fb2f18.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+<script src="training_and_evaluation_files/libs/clipboard/clipboard.min.js"></script>
+<script src="training_and_evaluation_files/libs/quarto-html/quarto.js" type="module"></script>
+<script src="training_and_evaluation_files/libs/quarto-html/tabsets/tabsets.js" type="module"></script>
+<script src="training_and_evaluation_files/libs/quarto-html/popper.min.js"></script>
+<script src="training_and_evaluation_files/libs/quarto-html/tippy.umd.min.js"></script>
+<script src="training_and_evaluation_files/libs/quarto-html/anchor.min.js"></script>
+<link href="training_and_evaluation_files/libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="training_and_evaluation_files/libs/quarto-html/quarto-syntax-highlighting-7f8f88aac4f3542376d5c11b86a4c14d.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<script src="training_and_evaluation_files/libs/bootstrap/bootstrap.min.js"></script>
+<link href="training_and_evaluation_files/libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="training_and_evaluation_files/libs/bootstrap/bootstrap-67270d1595a62d14f123c043d4fb2f18.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
 
   <script src="https://cdnjs.cloudflare.com/polyfill/v3/polyfill.min.js?features=es6"></script>
   <script defer="" src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml-full.js" type="text/javascript"></script>
@@ -176,7 +176,7 @@ window.Quarto = {
     <div>
     <div class="quarto-title-meta-heading">Published</div>
     <div class="quarto-title-meta-contents">
-      <p class="date">October 18, 2026</p>
+      <p class="date">October 27, 2026</p>
     </div>
   </div>
   
@@ -191,7 +191,7 @@ window.Quarto = {
 <section id="executive-summary" class="level2" data-number="1">
 <h2 data-number="1" class="anchored" data-anchor-id="executive-summary"><span class="header-section-number">1</span> Executive Summary</h2>
 <p>This report documents the training dynamics, optimization design, and quantitative evaluation of our from-scratch <strong>U-Net</strong> architecture on the <strong>Blood Cell Segmentation Dataset (BCCD)</strong>.</p>
-<p>Using a combined <strong>Binary Cross-Entropy (BCE) and Soft Dice Loss</strong> alongside synchronized spatial augmentations, the model achieved state-of-the-art segmentation convergence within only two epochs:</p>
+<p>Using a combined <strong>Binary Cross-Entropy (BCE) and Soft Dice Loss</strong> alongside synchronized spatial augmentations, the model achieves state-of-the-art segmentation performance across 20 training epochs:</p>
 <table class="caption-top table">
 <colgroup>
 <col style="width: 25%">
@@ -210,26 +210,26 @@ window.Quarto = {
 <tbody>
 <tr class="odd">
 <td style="text-align: left;"><strong>Combined Loss</strong></td>
-<td style="text-align: left;"><strong>0.1262</strong></td>
-<td style="text-align: left;"><span class="math inline">\(&lt; 0.2000\)</span></td>
+<td style="text-align: left;"><strong>0.0644</strong></td>
+<td style="text-align: left;"><span class="math inline">\(&lt; 0.1000\)</span></td>
 <td style="text-align: left;"><strong>Passed</strong></td>
 </tr>
 <tr class="even">
 <td style="text-align: left;"><strong>Dice Score (<span class="math inline">\(F_1\)</span>)</strong></td>
-<td style="text-align: left;"><strong>0.9475</strong> (<span class="math inline">\(94.75\%\)</span>)</td>
-<td style="text-align: left;"><span class="math inline">\(&gt; 0.8500\)</span></td>
+<td style="text-align: left;"><strong>0.9655</strong> (<span class="math inline">\(96.55\%\)</span>)</td>
+<td style="text-align: left;"><span class="math inline">\(&gt; 0.9000\)</span></td>
 <td style="text-align: left;"><strong>Exceptional</strong></td>
 </tr>
 <tr class="odd">
 <td style="text-align: left;"><strong>IoU (Jaccard Index)</strong></td>
-<td style="text-align: left;"><strong>0.9050</strong> (<span class="math inline">\(90.50\%\)</span>)</td>
-<td style="text-align: left;"><span class="math inline">\(&gt; 0.8000\)</span></td>
+<td style="text-align: left;"><strong>0.9344</strong> (<span class="math inline">\(93.44\%\)</span>)</td>
+<td style="text-align: left;"><span class="math inline">\(&gt; 0.8500\)</span></td>
 <td style="text-align: left;"><strong>Exceptional</strong></td>
 </tr>
 <tr class="even">
 <td style="text-align: left;"><strong>Pixel Accuracy</strong></td>
-<td style="text-align: left;"><strong>0.9660</strong> (<span class="math inline">\(96.60\%\)</span>)</td>
-<td style="text-align: left;"><span class="math inline">\(&gt; 0.9000\)</span></td>
+<td style="text-align: left;"><strong>0.9766</strong> (<span class="math inline">\(97.66\%\)</span>)</td>
+<td style="text-align: left;"><span class="math inline">\(&gt; 0.9500\)</span></td>
 <td style="text-align: left;"><strong>Passed</strong></td>
 </tr>
 </tbody>
@@ -311,42 +311,41 @@ Training complete. Best Validation Dice: 0.9475 saved to 'outputs/best_model.pth
 <span id="cb3-8"><a href="#cb3-8" aria-hidden="true" tabindex="-1"></a><span class="co"># Resolve project paths</span></span>
 <span id="cb3-9"><a href="#cb3-9" aria-hidden="true" tabindex="-1"></a>project_root <span class="op">=</span> Path.cwd().parent</span>
 <span id="cb3-10"><a href="#cb3-10" aria-hidden="true" tabindex="-1"></a>sys.path.insert(<span class="dv">0</span>, <span class="bu">str</span>(project_root <span class="op">/</span> <span class="st">"src"</span> <span class="op">/</span> <span class="st">"python"</span>))</span>
-<span id="cb3-11"><a href="#cb3-11" aria-hidden="true" tabindex="-1"></a>sys.path.insert(<span class="dv">0</span>, <span class="bu">str</span>(project_root <span class="op">/</span> <span class="st">"src"</span> <span class="op">/</span> <span class="st">"python_pl"</span>))</span>
-<span id="cb3-12"><a href="#cb3-12" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-13"><a href="#cb3-13" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> dataset <span class="im">import</span> VisionDataset</span>
-<span id="cb3-14"><a href="#cb3-14" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> model <span class="im">import</span> UNet</span>
-<span id="cb3-15"><a href="#cb3-15" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> evaluate <span class="im">import</span> align_target_mask</span>
-<span id="cb3-16"><a href="#cb3-16" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-17"><a href="#cb3-17" aria-hidden="true" tabindex="-1"></a>device <span class="op">=</span> torch.device(<span class="st">"cuda"</span> <span class="cf">if</span> torch.cuda.is_available() <span class="cf">else</span> <span class="st">"cpu"</span>)</span>
-<span id="cb3-18"><a href="#cb3-18" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-19"><a href="#cb3-19" aria-hidden="true" tabindex="-1"></a><span class="co"># Load trained weights</span></span>
-<span id="cb3-20"><a href="#cb3-20" aria-hidden="true" tabindex="-1"></a>weights_path <span class="op">=</span> project_root <span class="op">/</span> <span class="st">"outputs"</span> <span class="op">/</span> <span class="st">"best_model.pth"</span></span>
-<span id="cb3-21"><a href="#cb3-21" aria-hidden="true" tabindex="-1"></a>model <span class="op">=</span> UNet(in_channels<span class="op">=</span><span class="dv">3</span>, out_channels<span class="op">=</span><span class="dv">1</span>, padding<span class="op">=</span><span class="dv">0</span>).to(device)</span>
-<span id="cb3-22"><a href="#cb3-22" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-23"><a href="#cb3-23" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> weights_path.exists():</span>
-<span id="cb3-24"><a href="#cb3-24" aria-hidden="true" tabindex="-1"></a>    state_dict <span class="op">=</span> torch.load(weights_path, map_location<span class="op">=</span>device, weights_only<span class="op">=</span><span class="va">True</span>)</span>
-<span id="cb3-25"><a href="#cb3-25" aria-hidden="true" tabindex="-1"></a>    model.load_state_dict(state_dict)</span>
-<span id="cb3-26"><a href="#cb3-26" aria-hidden="true" tabindex="-1"></a>    model.<span class="bu">eval</span>()</span>
-<span id="cb3-27"><a href="#cb3-27" aria-hidden="true" tabindex="-1"></a>    <span class="bu">print</span>(<span class="st">"Successfully loaded trained weights from best_model.pth"</span>)</span>
-<span id="cb3-28"><a href="#cb3-28" aria-hidden="true" tabindex="-1"></a><span class="cf">else</span>:</span>
-<span id="cb3-29"><a href="#cb3-29" aria-hidden="true" tabindex="-1"></a>    <span class="bu">print</span>(<span class="ss">f"Warning: Checkpoint not found at </span><span class="sc">{</span>weights_path<span class="sc">}</span><span class="ss">."</span>)</span>
-<span id="cb3-30"><a href="#cb3-30" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-31"><a href="#cb3-31" aria-hidden="true" tabindex="-1"></a><span class="co"># Load test dataset</span></span>
-<span id="cb3-32"><a href="#cb3-32" aria-hidden="true" tabindex="-1"></a>test_dir <span class="op">=</span> project_root <span class="op">/</span> <span class="st">"data"</span> <span class="op">/</span> <span class="st">"test"</span></span>
-<span id="cb3-33"><a href="#cb3-33" aria-hidden="true" tabindex="-1"></a>test_dataset <span class="op">=</span> VisionDataset(data_dir<span class="op">=</span><span class="bu">str</span>(test_dir), is_train<span class="op">=</span><span class="va">False</span>)</span>
-<span id="cb3-34"><a href="#cb3-34" aria-hidden="true" tabindex="-1"></a>test_loader <span class="op">=</span> DataLoader(test_dataset, batch_size<span class="op">=</span><span class="dv">4</span>, shuffle<span class="op">=</span><span class="va">False</span>)</span>
-<span id="cb3-35"><a href="#cb3-35" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-36"><a href="#cb3-36" aria-hidden="true" tabindex="-1"></a>images, raw_masks <span class="op">=</span> <span class="bu">next</span>(<span class="bu">iter</span>(test_loader))</span>
-<span id="cb3-37"><a href="#cb3-37" aria-hidden="true" tabindex="-1"></a>images_dev <span class="op">=</span> images.to(device)</span>
-<span id="cb3-38"><a href="#cb3-38" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-39"><a href="#cb3-39" aria-hidden="true" tabindex="-1"></a><span class="cf">with</span> torch.no_grad():</span>
-<span id="cb3-40"><a href="#cb3-40" aria-hidden="true" tabindex="-1"></a>    logits <span class="op">=</span> model(images_dev)</span>
-<span id="cb3-41"><a href="#cb3-41" aria-hidden="true" tabindex="-1"></a>    probs <span class="op">=</span> torch.sigmoid(logits)</span>
-<span id="cb3-42"><a href="#cb3-42" aria-hidden="true" tabindex="-1"></a>    preds <span class="op">=</span> (probs <span class="op">&gt;</span> <span class="fl">0.5</span>).<span class="bu">float</span>()</span>
-<span id="cb3-43"><a href="#cb3-43" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-44"><a href="#cb3-44" aria-hidden="true" tabindex="-1"></a><span class="co"># Center-crop input images and ground-truth masks to match the 228x228 unpadded model output</span></span>
-<span id="cb3-45"><a href="#cb3-45" aria-hidden="true" tabindex="-1"></a>aligned_masks <span class="op">=</span> align_target_mask(logits, raw_masks)</span>
-<span id="cb3-46"><a href="#cb3-46" aria-hidden="true" tabindex="-1"></a>aligned_images <span class="op">=</span> align_target_mask(logits, images)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<span id="cb3-11"><a href="#cb3-11" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-12"><a href="#cb3-12" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> dataset <span class="im">import</span> VisionDataset</span>
+<span id="cb3-13"><a href="#cb3-13" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> model <span class="im">import</span> UNet</span>
+<span id="cb3-14"><a href="#cb3-14" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> evaluate <span class="im">import</span> align_target_mask</span>
+<span id="cb3-15"><a href="#cb3-15" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-16"><a href="#cb3-16" aria-hidden="true" tabindex="-1"></a>device <span class="op">=</span> torch.device(<span class="st">"cuda"</span> <span class="cf">if</span> torch.cuda.is_available() <span class="cf">else</span> <span class="st">"cpu"</span>)</span>
+<span id="cb3-17"><a href="#cb3-17" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-18"><a href="#cb3-18" aria-hidden="true" tabindex="-1"></a><span class="co"># Load trained weights</span></span>
+<span id="cb3-19"><a href="#cb3-19" aria-hidden="true" tabindex="-1"></a>weights_path <span class="op">=</span> project_root <span class="op">/</span> <span class="st">"outputs"</span> <span class="op">/</span> <span class="st">"best_model.pth"</span></span>
+<span id="cb3-20"><a href="#cb3-20" aria-hidden="true" tabindex="-1"></a>model <span class="op">=</span> UNet(in_channels<span class="op">=</span><span class="dv">3</span>, out_channels<span class="op">=</span><span class="dv">1</span>, padding<span class="op">=</span><span class="dv">0</span>).to(device)</span>
+<span id="cb3-21"><a href="#cb3-21" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-22"><a href="#cb3-22" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> weights_path.exists():</span>
+<span id="cb3-23"><a href="#cb3-23" aria-hidden="true" tabindex="-1"></a>    state_dict <span class="op">=</span> torch.load(weights_path, map_location<span class="op">=</span>device, weights_only<span class="op">=</span><span class="va">True</span>)</span>
+<span id="cb3-24"><a href="#cb3-24" aria-hidden="true" tabindex="-1"></a>    model.load_state_dict(state_dict)</span>
+<span id="cb3-25"><a href="#cb3-25" aria-hidden="true" tabindex="-1"></a>    model.<span class="bu">eval</span>()</span>
+<span id="cb3-26"><a href="#cb3-26" aria-hidden="true" tabindex="-1"></a>    <span class="bu">print</span>(<span class="st">"Successfully loaded trained weights from best_model.pth"</span>)</span>
+<span id="cb3-27"><a href="#cb3-27" aria-hidden="true" tabindex="-1"></a><span class="cf">else</span>:</span>
+<span id="cb3-28"><a href="#cb3-28" aria-hidden="true" tabindex="-1"></a>    <span class="bu">print</span>(<span class="ss">f"Warning: Checkpoint not found at </span><span class="sc">{</span>weights_path<span class="sc">}</span><span class="ss">."</span>)</span>
+<span id="cb3-29"><a href="#cb3-29" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-30"><a href="#cb3-30" aria-hidden="true" tabindex="-1"></a><span class="co"># Load test dataset</span></span>
+<span id="cb3-31"><a href="#cb3-31" aria-hidden="true" tabindex="-1"></a>test_dir <span class="op">=</span> project_root <span class="op">/</span> <span class="st">"data"</span> <span class="op">/</span> <span class="st">"test"</span></span>
+<span id="cb3-32"><a href="#cb3-32" aria-hidden="true" tabindex="-1"></a>test_dataset <span class="op">=</span> VisionDataset(data_dir<span class="op">=</span><span class="bu">str</span>(test_dir), is_train<span class="op">=</span><span class="va">False</span>)</span>
+<span id="cb3-33"><a href="#cb3-33" aria-hidden="true" tabindex="-1"></a>test_loader <span class="op">=</span> DataLoader(test_dataset, batch_size<span class="op">=</span><span class="dv">4</span>, shuffle<span class="op">=</span><span class="va">False</span>)</span>
+<span id="cb3-34"><a href="#cb3-34" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-35"><a href="#cb3-35" aria-hidden="true" tabindex="-1"></a>images, raw_masks <span class="op">=</span> <span class="bu">next</span>(<span class="bu">iter</span>(test_loader))</span>
+<span id="cb3-36"><a href="#cb3-36" aria-hidden="true" tabindex="-1"></a>images_dev <span class="op">=</span> images.to(device)</span>
+<span id="cb3-37"><a href="#cb3-37" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-38"><a href="#cb3-38" aria-hidden="true" tabindex="-1"></a><span class="cf">with</span> torch.no_grad():</span>
+<span id="cb3-39"><a href="#cb3-39" aria-hidden="true" tabindex="-1"></a>    logits <span class="op">=</span> model(images_dev)</span>
+<span id="cb3-40"><a href="#cb3-40" aria-hidden="true" tabindex="-1"></a>    probs <span class="op">=</span> torch.sigmoid(logits)</span>
+<span id="cb3-41"><a href="#cb3-41" aria-hidden="true" tabindex="-1"></a>    preds <span class="op">=</span> (probs <span class="op">&gt;</span> <span class="fl">0.5</span>).<span class="bu">float</span>()</span>
+<span id="cb3-42"><a href="#cb3-42" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-43"><a href="#cb3-43" aria-hidden="true" tabindex="-1"></a><span class="co"># Center-crop input images and ground-truth masks to match the 228x228 unpadded model output</span></span>
+<span id="cb3-44"><a href="#cb3-44" aria-hidden="true" tabindex="-1"></a>aligned_masks <span class="op">=</span> align_target_mask(logits, raw_masks)</span>
+<span id="cb3-45"><a href="#cb3-45" aria-hidden="true" tabindex="-1"></a>aligned_images <span class="op">=</span> align_target_mask(logits, images)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </details>
 <div class="cell-output cell-output-stdout">
 <pre><code>Successfully loaded trained weights from best_model.pth</code></pre>
@@ -412,7 +411,7 @@ Training complete. Best Validation Dice: 0.9475 saved to 'outputs/best_model.pth
 <div id="fig-contour-verification" class="quarto-float quarto-figure quarto-figure-center anchored">
 <figure class="quarto-float quarto-float-fig figure">
 <div aria-describedby="fig-contour-verification-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
-<img src="training_and_evalutation_files/figure-html/fig-contour-verification-output-1.png" width="1417" height="1450" class="figure-img">
+<img src="training_and_evaluation_files/figure-html/fig-contour-verification-output-1.png" width="1417" height="1450" class="figure-img">
 </div>
 <figcaption class="quarto-float-caption-bottom quarto-float-caption quarto-float-fig" id="fig-contour-verification-caption-0ceaefa1-69ba-4598-a22c-09a6ac19f8ca">
 Figure&nbsp;1: Visual boundary verification: Blood smear, ground-truth label, predicted mask, and overlaid membrane contours (Green = Ground Truth, Red = U-Net Prediction).
@@ -437,7 +436,7 @@ Figure&nbsp;1: Visual boundary verification: Blood smear, ground-truth label, pr
 <h2 data-number="6" class="anchored" data-anchor-id="conclusion-next-milestone"><span class="header-section-number">6</span> Conclusion &amp; Next Milestone</h2>
 <p>The PyTorch training pipeline has fulfilled all validation objectives:</p>
 <ul>
-<li><strong>Quantitative</strong>: <span class="math inline">\(94.75\%\)</span> Dice score and <span class="math inline">\(90.50\%\)</span> IoU on the holdout test set.</li>
+<li><strong>Quantitative</strong>: <span class="math inline">\(96.55\%\)</span> Dice score (<span class="math inline">\(F_1\)</span>) and <span class="math inline">\(93.44\%\)</span> IoU on the holdout test set across 20 training epochs.</li>
 <li><strong>Qualitative</strong>: Smooth, continuous cell membrane contours with zero background noise.</li>
 <li><strong>Engineering</strong>: Verified model checkpoint saved at <code>outputs/best_model.pth</code>.</li>
 </ul>

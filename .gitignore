@@ -5,6 +5,8 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.so
+.pytest_cache/
+.ruff_cache/
 
 # ==========================================
 # Virtual Environments & Packages
@@ -13,7 +15,6 @@ __pycache__/
 venv/
 env/
 ENV/
-src/python_pl/venv/
 src/python/venv/
 develop-eggs/
 dist/
@@ -29,8 +30,7 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
-node_modules/**
-*.json
+node_modules/
 
 # ==========================================
 # PyTorch & Machine Learning Artifacts
@@ -39,6 +39,7 @@ node_modules/**
 *.pt
 *.pth
 *.onnx
+*.onnx.data
 *.engine
 *.bin
 
@@ -84,7 +85,6 @@ data/test/mask/*
 # Build directories
 build/
 bin/
-src/cpp_pl/build/
 src/cpp/build/
 cmake-build-*/
 out/
@@ -133,4 +133,3 @@ desktop.ini
 !.vscode/tasks.json
 !.vscode/launch.json
 !.vscode/extensions.json
-node_modules/

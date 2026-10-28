@@ -8,6 +8,7 @@ import numpy as np
 import onnx  # pyright: ignore[reportMissingTypeStubs]
 import onnxruntime as ort  # pyright: ignore[reportMissingTypeStubs]
 import torch
+from config_utils import load_config
 from model import UNet
 
 
@@ -94,44 +95,59 @@ def export_to_onnx(
 
 
 def main() -> None:
+    conf_parser = argparse.ArgumentParser(add_help=False)
+    conf_parser.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        help="Path to YAML configuration file.",
+    )
+    conf_args, _ = conf_parser.parse_known_args()
+
+    cfg = load_config(conf_args.config)
+    cfg_data = cfg.get("data", {})
+    cfg_model = cfg.get("model", {})
+    cfg_export = cfg.get("export", {})
+
     parser = argparse.ArgumentParser(
-        description="Export trained PyTorch U-Net to static ONNX format."
+        description="Export trained PyTorch U-Net to static ONNX format.",
+        parents=[conf_parser],
     )
     _ = parser.add_argument(
         "--weights",
         type=str,
-        default="./outputs/best_model.pth",
+        default=cfg_export.get("weights", "./outputs/best_model.pth"),
         help="Path to trained PyTorch state_dict (.pth).",
     )
     _ = parser.add_argument(
         "--output",
         type=str,
-        default="./outputs/model.onnx",
+        default=cfg_export.get("output", "./outputs/model.onnx"),
         help="Output path for serialized .onnx model.",
     )
     _ = parser.add_argument(
         "--height",
         type=int,
-        default=416,
+        default=int(cfg_data.get("input_height", 416)),
         help="Static input image height.",
     )
     _ = parser.add_argument(
         "--width",
         type=int,
-        default=416,
+        default=int(cfg_data.get("input_width", 416)),
         help="Static input image width.",
     )
     _ = parser.add_argument(
         "--padding",
         type=int,
-        default=0,
+        default=int(cfg_model.get("padding", 0)),
         choices=[0, 1],
         help="Convolution padding used during training (0=unpadded, 1=padded).",
     )
     _ = parser.add_argument(
         "--opset",
         type=int,
-        default=17,
+        default=int(cfg_export.get("opset_version", 17)),
         help="ONNX opset version.",
     )
     args = parser.parse_args()

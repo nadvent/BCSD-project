@@ -18,14 +18,24 @@ class VisionDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
     images_dir: str
     masks_dir: str
     is_train: bool
+    input_height: int
+    input_width: int
     filenames: list[str]
     normalize: transforms.Normalize
 
-    def __init__(self, data_dir: str, is_train: bool = True) -> None:
+    def __init__(
+        self,
+        data_dir: str,
+        is_train: bool = True,
+        input_height: int = 416,
+        input_width: int = 416,
+    ) -> None:
         self.data_dir = data_dir
         self.images_dir = os.path.join(data_dir, "original")
         self.masks_dir = os.path.join(data_dir, "mask")
         self.is_train = is_train
+        self.input_height = input_height
+        self.input_width = input_width
 
         if not os.path.exists(self.images_dir):
             raise FileNotFoundError(f"Directory '{self.images_dir}' not found")
@@ -56,6 +66,8 @@ class VisionDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
         mask_path: str = os.path.join(self.masks_dir, f"{stem}.png")
         if not os.path.exists(mask_path):
             mask_path = os.path.join(self.masks_dir, f"{stem}.jpg")
+        if not os.path.exists(mask_path):
+            raise FileNotFoundError(f"Ground truth mask not found for image: {filename}")
 
         image: Image.Image = Image.open(img_path).convert("RGB")
         mask: Image.Image = Image.open(mask_path).convert("L")
@@ -65,17 +77,17 @@ class VisionDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
 
         mask_tensor = F.resize(
             mask_tensor,
-            [416, 416],
+            [self.input_height, self.input_width],
             interpolation=transforms.InterpolationMode.NEAREST,
         )
         image_tensor = F.resize(
             image_tensor,
-            [416, 416],
+            [self.input_height, self.input_width],
             interpolation=transforms.InterpolationMode.BILINEAR,
         )
 
         # In medical imaging, the orientation of the images are valid even if
-        # it's flipped horizontally. Hence, we can get augment our data better
+        # it's flipped horizontally. Hence, we can augment our data better
         if self.is_train and bool(torch.rand(1).item() < 0.5):
             image_tensor = F.hflip(image_tensor)
             mask_tensor = F.hflip(mask_tensor)

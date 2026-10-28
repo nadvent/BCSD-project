@@ -36,11 +36,11 @@ An end-to-end computer vision and systems engineering pipeline combining **PyTor
 
 Accurate identification and boundary localization of hematological cells (erythrocytes/red blood cells, leukocytes/white blood cells, and platelets) in peripheral blood smears is an essential diagnostic step in clinical pathology. To address this, the project implements a **U-Net** segmentation architecture—widely regarded as an industry standard in biomedical imaging for its ability to extract fine-grained local morphological features, fuse multi-scale spatial context via symmetric skip connections, and generalize effectively from small clinical datasets when paired with spatial data augmentation.
 
-The model architecture is primarily based on the foundational 2015 U-Net paper by Ronneberger et al. ([U-Net: Convolutional Networks for Biomedical Image Segmentation](https://www.google.com/search?q=https%3A%2F%2Farxiv.org%2Fabs%2F1505.04597)), supporting both **`valid` (unpadded)** convolutions—which eliminate border zero-padding artifacts and require center-cropping along skip connections—and **`same` (one-padded)** convolutions—which preserve exact spatial dimensions ($H \times W$) throughout the contracting and expanding paths. Do note that since `same` padded convolutions have a larger output size (dimensionality), there is more complexity to train and evaluate the model.
+The model architecture is primarily based on the foundational 2015 U-Net paper by Ronneberger et al. ([U-Net: Convolutional Networks for Biomedical Image Segmentation](https://arxiv.org/abs/1505.04597)), supporting both **`valid` (unpadded)** convolutions—which eliminate border zero-padding artifacts and require center-cropping along skip connections—and **`same` (one-padded)** convolutions—which preserve exact spatial dimensions ($H \times W$) throughout the contracting and expanding paths. Do note that since `same` padded convolutions have a larger output size (dimensionality), there is more complexity to train and evaluate the model.
 
 ## References
 
-- Ronneberger, O., Fischer, P., & Brox, T. (2015). [U-Net: Convolutional Networks for Biomedical Image Segmentation](https://www.google.com/search?q=https%3A%2F%2Farxiv.org%2Fabs%2F1505.04597). In _Medical Image Computing and Computer-Assisted Intervention – MICCAI 2015_ (pp. 234–241). Springer. (`arXiv:1505.04597`)
+- Ronneberger, O., Fischer, P., & Brox, T. (2015). [U-Net: Convolutional Networks for Biomedical Image Segmentation](https://arxiv.org/abs/1505.04597). In _Medical Image Computing and Computer-Assisted Intervention – MICCAI 2015_ (pp. 234–241). Springer. (`arXiv:1505.04597`)
 
 This repository bridges research experimentation and production deployment:
 
@@ -109,6 +109,7 @@ All scripts, C++ modules, notebooks, and configurations follow standard, consist
 ```
 .
 ├── config/                          # YAML configuration files (hyperparameters, paths)
+│   └── default.yaml                 # Centralized training, export & runtime hyperparameters
 ├── data/
 │   ├── test/
 │   │   ├── mask/                    # Ground truth binary masks (lossless PNG)
@@ -119,7 +120,7 @@ All scripts, C++ modules, notebooks, and configurations follow standard, consist
 ├── notebook/                        # Quarto notebooks, rendered HTML reports & presentations
 │   ├── dataset_exploration.qmd      # EDA, label sanity checks, and paired image-mask overlays
 │   ├── unet_architecture_notes.qmd  # Mathematical receptive field & skip-connection derivations
-│   ├── training_and_evalutation.qmd # Training progression, loss curves, and validation metrics
+│   ├── training_and_evaluation.qmd  # Training progression, loss curves, and validation metrics
 │   ├── cpp_inference.qmd            # C++ ONNX Runtime integration & xeus-cling interactive guide
 │   ├── presentation.qmd             # Reveal.js 11-slide technical portfolio presentation
 │   └── cpp_inference_comparison.png # 4-column visual verification grid
@@ -135,15 +136,21 @@ All scripts, C++ modules, notebooks, and configurations follow standard, consist
 │   │   │   └── inference_engine.hpp # C++ SegmentationEngine class declaration & data structures
 │   │   └── src/
 │   │       ├── inference_engine.cpp # Preprocessing, zero-copy inference, and contour postprocessing
-│   │       └── main.cpp             # CLI driver for single-image and batch inference
+│   │       ├── main.cpp             # CLI driver for single-image and batch inference
+│   │       └── benchmark_ort.cpp    # High-precision C++ ONNX Runtime systems benchmark
 │   └── python/                      # PyTorch training, evaluation, and export pipeline
+│       ├── config_utils.py          # YAML config parser with CLI argument overrides
 │       ├── dataset.py               # VisionDataset with torchvision.transforms.v2
 │       ├── model.py                 # From-scratch U-Net (supports padding=0 and padding=1)
 │       ├── train.py                 # AdamW + ReduceLROnPlateau training engine
 │       ├── evaluate.py              # BCEDiceLoss and Dice/IoU/PixelAccuracy metrics
 │       ├── export_onnx.py           # PyTorch to static ONNX export with parity verification
 │       ├── benchmark_python.py      # Python Eager vs torch.compile vs ONNX latency profiling
+│       ├── benchmark_ort.py         # Dedicated Python ONNX Runtime systems benchmark
+│       ├── benchmark_torch_compile.py # Dedicated torch.compile systems benchmark
 │       └── requirements.txt         # Pinned Python package dependencies
+├── tests/                           # Automated unit & integration tests
+│   └── test_pipeline.py             # Pytest suite for dataset, model, loss & ONNX export
 ├── LICENSE                          # MIT License
 └── README.md                        # Project documentation
 ```
@@ -154,7 +161,7 @@ All scripts, C++ modules, notebooks, and configurations follow standard, consist
 
 ### Default Benchmark: BCCD with Mask
 
-This project is configured and benchmarked out-of-the-box using the [Kaggle BCCD Dataset with Mask](https://www.google.com/search?q=https%3A%2F%2Fwww.kaggle.com%2Fdatasets%2Fjeetblahiri%2Fbccd-dataset-with-mask) created by Jeet Lahiri.
+This project is configured and benchmarked out-of-the-box using the [Kaggle BCCD Dataset with Mask](https://www.kaggle.com/datasets/jeetblahiri/bccd-dataset-with-mask) created by Jeet Lahiri.
 
 You can download it manually from Kaggle or via the Kaggle CLI:
 
@@ -193,7 +200,7 @@ data/
 
 ### Python Environment (uv or venv)
 
-I personally use[uv](https://www.google.com/search?q=https%3A%2F%2Fgithub.com%2Fastral-sh%2Fuv) for fast, reproducible dependency resolution, or standard `venv`:
+I personally use [uv](https://github.com/astral-sh/uv) for fast, reproducible dependency resolution, or standard `venv`:
 
 #### Option A: Using `uv` (Recommended)
 
@@ -405,7 +412,7 @@ Render the comprehensive documentation suite located in `notebook/`:
 quarto render notebook/unet_architecture_notes.qmd
 
 # 2. Training Progression & Evaluation Report
-quarto render notebook/training_and_evalutation.qmd
+quarto render notebook/training_and_evaluation.qmd
 
 # 3. C++ Inference Engine & xeus-cling Interactive Guide
 quarto render notebook/cpp_inference.qmd
@@ -507,4 +514,4 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-For full legal terms, see the project [LICENSE](https://www.google.com/search?q=LICENSE) file.
+For full legal terms, see the project [LICENSE](LICENSE) file.

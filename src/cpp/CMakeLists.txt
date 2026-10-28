@@ -258,5 +258,37 @@ if(ipo_supported)
     set_target_properties(benchmark_ort PROPERTIES INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
 endif()
 
+# ==============================================================================
+# 5. Define Automated Unit Test Target & CTest Integration
+# ==============================================================================
+enable_testing()
+
+add_executable(test_engine
+    src/test_engine.cpp
+    src/inference_engine.cpp
+    include/inference_engine.hpp
+)
+
+target_include_directories(test_engine PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${OpenCV_INCLUDE_DIRS}
+    ${ONNXRUNTIME_INCLUDE_DIR}
+    "${ONNXRUNTIME_INCLUDE_DIR}/.."
+)
+
+target_link_libraries(test_engine PRIVATE
+    ${OpenCV_LIBS}
+    ${ONNXRUNTIME_LIB}
+    ${CMAKE_DL_LIBS}
+)
+
+target_compile_options(test_engine PRIVATE
+    -Wall -Wextra -Wpedantic
+    $<$<CONFIG:Release>:-O3 -march=native -funroll-loops>
+)
+
+add_test(NAME EngineUnitTests COMMAND test_engine)
+
+
 
 

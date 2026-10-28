@@ -27,9 +27,9 @@ This final technical report documents the deployment phase of the **Blood Cell S
 | :--- | :--- | :--- | :--- |
 | **1. Data Pipeline** | `src/python/dataset.py` | $1,169$ train / $159$ test samples | Paired `transforms.v2`, nearest-neighbor mask resize |
 | **2. Model Architecture** | `src/python/model.py` | $31.0\text{M}$ parameters (Unpadded U-Net) | From-scratch encoder-decoder with `_center_crop` skips |
-| **3. Training & Validation** | `src/python/train.py`, `evaluate.py` | **Dice: $0.9475$** \| **IoU: $0.9050$** \| **Acc: $0.9660$** | Converged in 2 epochs via Combined BCE + Soft Dice Loss |
+| **3. Training & Validation** | `src/python/train.py`, `evaluate.py` | **Dice: $0.9655$** \| **IoU: $0.9344$** \| **Acc: $0.9766$** | 20 epochs via Combined BCE + Soft Dice Loss |
 | **4. Graph Serialization** | `src/python/export_onnx.py` | **Max Abs Diff: $2.42 \times 10^{-6}$** | Static `[1, 3, 416, 416]` graph with BatchNorm folding |
-| **5. C++ Engine** | `src/cpp/inference_app` | Zero-copy NCHW tensor binding | Logit-threshold optimization ($\sigma(z)>0.5 \iff z>0$) |
+| **5. C++ Engine** | `src/cpp/inference_app` | **Throughput: $28.57\text{ FPS}$** (E2E) | Fused FMA, `Ort::IoBinding`, SIMD logit thresholding |
 
 ---
 
@@ -58,24 +58,21 @@ OpenCV and ONNX Runtime use fundamentally different memory layouts:
 * **ONNX Runtime (`input` tensor)** expects **RGB** channel order stored in **contiguous planar blocks** ($\text{NCHW}$):
   $$\text{Memory Address: } [\underbrace{R_{0,0}, R_{0,1}, \dots}_{\text{Plane 0 }(416\times 416)}, \; \underbrace{G_{0,0}, G_{0,1}, \dots}_{\text{Plane 1 }(416\times 416)}, \; \underbrace{B_{0,0}, B_{0,1}, \dots}_{\text{Plane 2 }(416\times 416)}]$$
 
-In `SegmentationEngine::preprocess()`, we resize the input image to $416 \times 416$, convert $\text{BGR} \to \text{RGB}$, scale intensities to $[0.0, 1.0]$, and use three pointer offsets (`r_plane`, `g_plane`, `b_plane` separated by $H \times W = 173,056$ floats) to transpose and apply ImageNet normalization in a single loop.
+In `SegmentationEngine::preprocess_into()`, we resize the input image to $416 \times 416$ and perform a fused single-pass BGR $\to$ planar RGB transformation directly into a pre-allocated contiguous buffer. Instead of dynamic allocations, precomputed fused multiply-add (FMA) scaling factors apply ImageNet normalization in a single pass:
+$$P_{\text{norm}} = P \cdot \text{scale} + \text{bias}, \quad \text{scale} = \frac{1}{255 \cdot \sigma}, \quad \text{bias} = -\frac{\mu}{\sigma}$$
 
-### 3. Zero-Copy Tensor Binding
+### 3. Zero-Copy Persistent Tensor Binding (`Ort::IoBinding`)
 
-Rather than copying the preprocessed `std::vector<float>` into a separate runtime buffer, `SegmentationEngine::predict()` binds the vector's underlying heap pointer (`input_data.data()`) directly into an `Ort::Value` tensor:
+Rather than reallocating input tensors per frame, `SegmentationEngine` binds a persistent `Ort::Value` memory tensor backed by CPU arena memory directly to the session's input and output via `Ort::IoBinding`:
 
 ```cpp
-Ort::MemoryInfo memory_info = Ort::MemoryInfo::CreateCpu(
-    OrtArenaAllocator, OrtMemTypeDefault
-);
+input_tensor_ = Ort::Value::CreateTensor<float>(
+    memory_info_, input_buffer_.data(), input_buffer_.size(),
+    input_shape_.data(), input_shape_.size());
 
-Ort::Value input_tensor = Ort::Value::CreateTensor<float>(
-    memory_info,
-    input_data.data(),
-    input_data.size(),
-    input_shape.data(),
-    input_shape.size()
-);
+io_binding_ = std::make_unique<Ort::IoBinding>(*session_);
+io_binding_->BindInput(input_name_.c_str(), input_tensor_);
+io_binding_->BindOutput(output_name_.c_str(), memory_info_);
 ```
 
 ### 4. Mathematical Postprocessing Shortcut: Eliminating $51,984$ `std::exp()` Calls
@@ -88,7 +85,7 @@ Evaluating `std::exp(-z)` across $228 \times 228 = 51,984$ pixels adds unnecessa
 
 $$\frac{1}{1 + e^{-z}} > p \iff z > \ln\!\left(\frac{p}{1 - p}\right)$$
 
-For our standard threshold $p = 0.5$, $\ln(0.5 / 0.5) = \ln(1) = 0.0\text{f}$. Thus, checking `z > 0.0f` produces the **exact same binary mask** using a single floating-point comparison instruction (`ucomiss`) per pixel.
+For our standard threshold $p = 0.5$, $\ln(0.5 / 0.5) = \ln(1) = 0.0\text{f}$. Thus, checking `z > 0.0f` produces the **exact same binary mask**. Furthermore, wrapping the raw logit pointer in a zero-copy `cv::Mat` header and invoking `cv::compare(logits_mat, logit_threshold, out_binary_mask, cv::CMP_GT)` thresholds all 51,984 pixels using hardware SIMD vector instructions.
 
 ---
 
@@ -231,7 +228,7 @@ If rendering without executing the binary live, you can also embed the pre-rende
 ### 1. Mathematical & Architectural Takeaways
 
 * **Unpadded U-Net & Skip Cropping**: Building the original 2015 unpadded U-Net (`padding=0`) from scratch demonstrated how $3 \times 3$ convolutions reduce spatial resolution by $2$ pixels per layer ($416 \times 416 \to 228 \times 228$), requiring exact center-cropping (`_center_crop`) across all four skip connections and target masks.
-* **Synergy of Combined BCE + Soft Dice Loss**: Pairing `nn.BCEWithLogitsLoss` (using the log-sum-exp trick for floating-point stability) with differentiable Soft Dice Loss resolved foreground-to-background class imbalance, achieving a **$94.75\%$ Dice Score** and **$90.50\%$ IoU** within just 2 epochs.
+* **Synergy of Combined BCE + Soft Dice Loss**: Pairing `nn.BCEWithLogitsLoss` (using the log-sum-exp trick for floating-point stability) with differentiable Soft Dice Loss resolved foreground-to-background class imbalance, achieving a **$96.55\%$ Dice Score** and **$93.44\%$ IoU** on the holdout test set.
 * **Lossless Graph Portability**: Exporting to ONNX with constant folding absorbed all `BatchNorm2d` layers into their preceding `Conv2d` weights, achieving a $2.42 \times 10^{-6}$ parity difference between Python and C++.
 
 ### 2. Systems & Deployment Effectiveness

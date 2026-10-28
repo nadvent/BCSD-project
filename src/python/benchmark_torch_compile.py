@@ -4,8 +4,9 @@ import argparse
 import os
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Any, cast
 
 import cv2
 import numpy as np
@@ -23,7 +24,7 @@ def sync_cuda(device: torch.device) -> None:
         torch.cuda.synchronize()
 
 
-def compute_stats(timings: List[float]) -> Dict[str, float]:
+def compute_stats(timings: list[float]) -> dict[str, float]:
     """Calculate descriptive percentiles and latency distribution metrics in ms."""
     arr = np.array(timings, dtype=np.float64)
     return {
@@ -40,18 +41,18 @@ def load_model(weights_path: str | None, device: torch.device, padding: int = 0)
     """Instantiate and switch model to evaluation mode."""
     model = UNet(in_channels=3, out_channels=1, padding=padding).to(device)
     if weights_path and os.path.exists(weights_path):
-        state_dict = torch.load(weights_path, map_location=device, weights_only=True)
+        state_dict: dict[str, Any] = torch.load(weights_path, map_location=device, weights_only=True)
         model.load_state_dict(state_dict)
-    model.eval()
+    _ = model.eval()
     return model
 
 
 def benchmark_pure_inference(
-    fn,
+    fn: Callable[[], Any],
     warmup: int,
     runs: int,
     device: torch.device,
-) -> Tuple[Dict[str, float], float]:
+) -> tuple[dict[str, float], float]:
     """Measure compilation / first-call latency followed by steady-state inference."""
     # Measure initial execution (includes TorchDynamo tracing + Inductor compilation)
     sync_cuda(device)
@@ -69,7 +70,7 @@ def benchmark_pure_inference(
     sync_cuda(device)
 
     # Timed steady-state benchmark passes
-    timings: List[float] = []
+    timings: list[float] = []
     with torch.no_grad():
         for _ in range(runs):
             t0 = time.perf_counter()
@@ -90,7 +91,7 @@ def run_benchmark(
     warmup: int,
     padding: int,
     compare_onnx: bool,
-):
+) -> None:
     if device_str == "auto":
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     else:
@@ -140,22 +141,22 @@ def run_benchmark(
     # 3. torch.compile(mode="reduce-overhead") (CUDA Graphs enabled)
     # -------------------------------------------------------------------------
     print("[3/3] Benchmarking torch.compile(mode='reduce-overhead')...")
+    reduce_stats: dict[str, float] | None = None
+    reduce_first_ms: float = 0.0
     if device.type == "cuda":
         model_reduce = torch.compile(model_eager, mode="reduce-overhead")
         reduce_stats, reduce_first_ms = benchmark_pure_inference(
             lambda: model_reduce(input_tensor), warmup, runs, device
         )
-    else:
-        reduce_stats = None
-        reduce_first_ms = 0.0
 
     # -------------------------------------------------------------------------
     # Optional: Python ONNX Runtime Comparison
     # -------------------------------------------------------------------------
-    ort_stats = None
+    ort_stats: dict[str, float] | None = None
+    active_ep = "N/A"
     if compare_onnx and os.path.exists("outputs/model.onnx"):
         try:
-            import onnxruntime as ort
+            import onnxruntime as ort  # pyright: ignore[reportMissingTypeStubs]
 
             opts = ort.SessionOptions()
             opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
@@ -169,7 +170,7 @@ def run_benchmark(
                 else ["CPUExecutionProvider"]
             )
             session = ort.InferenceSession("outputs/model.onnx", opts, providers=providers)
-            active_ep = session.get_providers()[0]
+            active_ep = cast(str, session.get_providers()[0])
             dummy_np = input_tensor.detach().cpu().numpy()
             feed = {session.get_inputs()[0].name: dummy_np}
             out_name = session.get_outputs()[0].name
@@ -179,7 +180,7 @@ def run_benchmark(
                 _ = session.run([out_name], feed)
             sync_cuda(device)
 
-            ort_timings = []
+            ort_timings: list[float] = []
             for _ in range(runs):
                 t0 = time.perf_counter()
                 _ = session.run([out_name], feed)
@@ -199,7 +200,7 @@ def run_benchmark(
     print(header)
     print("-" * len(header))
 
-    modes = [
+    modes: list[tuple[str, dict[str, float], float]] = [
         ("PyTorch Eager", eager_stats, eager_first_ms),
         ("torch.compile(default)", default_stats, default_first_ms),
     ]
@@ -225,7 +226,7 @@ def run_benchmark(
     mean_arr = np.array([0.485, 0.456, 0.406], dtype=np.float32).reshape(1, 1, 3)
     std_arr = np.array([0.229, 0.224, 0.225], dtype=np.float32).reshape(1, 1, 3)
 
-    def pipeline_step():
+    def pipeline_step() -> tuple[float, float, float, float]:
         t_pre0 = time.perf_counter()
         resized = cv2.resize(bgr_image, (416, 416), interpolation=cv2.INTER_LINEAR)
         rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
@@ -235,7 +236,7 @@ def run_benchmark(
         t_pre1 = time.perf_counter()
 
         t_inf0 = time.perf_counter()
-        logits_tensor = best_compiled(t_in)
+        logits_tensor = cast(torch.Tensor, best_compiled(t_in))
         sync_cuda(device)
         t_inf1 = time.perf_counter()
 
@@ -260,7 +261,10 @@ def run_benchmark(
         _ = pipeline_step()
     sync_cuda(device)
 
-    pre_list, inf_list, post_list, tot_list = [], [], [], []
+    pre_list: list[float] = []
+    inf_list: list[float] = []
+    post_list: list[float] = []
+    tot_list: list[float] = []
     for _ in range(runs):
         p_ms, i_ms, pos_ms, tot_ms = pipeline_step()
         pre_list.append(p_ms)
@@ -292,7 +296,7 @@ def run_benchmark(
     print("======================================================================\n")
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="PyTorch torch.compile() Systems Benchmark",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,

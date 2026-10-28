@@ -7,10 +7,20 @@ from typing import cast, final
 
 import torch
 import torch.nn as nn
+from config_utils import load_config
 from dataset import VisionDataset
 from model import UNet
 from torch.utils.data import DataLoader
 from typing_extensions import override
+
+
+def select_device() -> torch.device:
+    """Selects the best available hardware accelerator (CUDA, MPS, or CPU)."""
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    if torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
 
 
 def align_target_mask(
@@ -179,33 +189,55 @@ def evaluate_model(
 
 
 def main() -> None:
+    conf_parser = argparse.ArgumentParser(add_help=False)
+    conf_parser.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        help="Path to YAML configuration file.",
+    )
+    conf_args, _ = conf_parser.parse_known_args()
+
+    cfg = load_config(conf_args.config)
+    cfg_data = cfg.get("data", {})
+    cfg_model = cfg.get("model", {})
+    cfg_train = cfg.get("training", {})
+    cfg_export = cfg.get("export", {})
+
     parser = argparse.ArgumentParser(
-        description="Evaluate trained U-Net on the test split."
+        description="Evaluate trained U-Net on the test split.",
+        parents=[conf_parser],
     )
     _ = parser.add_argument(
         "--weights",
         type=str,
-        default="./outputs/best_model.pth",
+        default=cfg_export.get("weights", "./outputs/best_model.pth"),
         help="Path to saved model state_dict (.pth).",
     )
     _ = parser.add_argument(
         "--data_dir",
         type=str,
-        default="./data/test",
+        default=cfg_data.get("val_dir", "./data/test"),
         help="Path to test dataset directory.",
     )
     _ = parser.add_argument(
         "--batch_size",
         type=int,
-        default=4,
+        default=int(cfg_train.get("batch_size", 4)),
         help="Batch size for evaluation.",
     )
     _ = parser.add_argument(
         "--padding",
         type=int,
-        default=0,
+        default=int(cfg_model.get("padding", 0)),
         choices=[0, 1],
         help="Convolution padding used in U-Net (0=unpadded, 1=padded).",
+    )
+    _ = parser.add_argument(
+        "--bce_weight",
+        type=float,
+        default=float(cfg_train.get("bce_weight", 0.5)),
+        help="BCE weight in combined BCEDiceLoss.",
     )
     args = parser.parse_args()
 
@@ -213,8 +245,9 @@ def main() -> None:
     data_dir = cast(str, args.data_dir)
     batch_size = cast(int, args.batch_size)
     padding = cast(int, args.padding)
+    bce_weight = cast(float, args.bce_weight)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device: torch.device = select_device()
 
     test_dataset = VisionDataset(data_dir=data_dir, is_train=False)
     test_loader: DataLoader[tuple[torch.Tensor, torch.Tensor]] = DataLoader(
@@ -235,7 +268,7 @@ def main() -> None:
     )
     _ = model.load_state_dict(state_dict)
 
-    criterion = BCEDiceLoss(bce_weight=0.5)
+    criterion = BCEDiceLoss(bce_weight=bce_weight)
     metrics: EvaluationMetrics = evaluate_model(
         model=model,
         dataloader=test_loader,
