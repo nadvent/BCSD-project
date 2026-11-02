@@ -90,7 +90,7 @@ def train_one_epoch(
 
 
 def main() -> None:
-    # 0. Check for optional --config argument before full parsing
+    # 0. --config flag
     conf_parser = argparse.ArgumentParser(add_help=False)
     conf_parser.add_argument(
         "--config",
@@ -194,7 +194,7 @@ def main() -> None:
     device: torch.device = select_device()
     print(f"Using compute device: {device}")
 
-    # 1. Initialize Datasets and DataLoaders
+    # 1. Datasets and DataLoaders
     train_dataset = VisionDataset(
         data_dir=train_dir,
         is_train=True,
@@ -226,7 +226,7 @@ def main() -> None:
         f"Loaded {len(train_dataset)} training samples and {len(val_dataset)} validation samples."
     )
 
-    # 2. Initialize Model, Loss, Optimizer, and Scheduler
+    # 2. Model, Loss, Optimizer, and Scheduler
     model = UNet(in_channels=3, out_channels=1, padding=padding).to(device)
     criterion = BCEDiceLoss(bce_weight=bce_weight)
     optimizer = AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)

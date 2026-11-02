@@ -15,7 +15,7 @@ from typing_extensions import override
 
 
 def select_device() -> torch.device:
-    """Selects the best available hardware accelerator (CUDA, MPS, or CPU)."""
+    # CUDA > MPS > CPU
     if torch.cuda.is_available():
         return torch.device("cuda")
     if torch.backends.mps.is_available():
@@ -51,7 +51,7 @@ def align_target_mask(
 
 @final
 class BCEDiceLoss(nn.Module):
-    """Combined Binary Cross-Entropy (with logits) and Soft Dice Loss."""
+    """Combined BCE and Soft Dice Loss."""
 
     bce_weight: float
     smooth: float
@@ -113,7 +113,7 @@ def compute_batch_metrics(
     threshold: float = 0.5,
     eps: float = 1e-6,
 ) -> tuple[float, float, float]:
-    """Computes discrete Dice Coefficient (F1), IoU (Jaccard Index), and Pixel Accuracy."""
+    """Dice Coefficient (F1), IoU (Jaccard Index), and Pixel Accuracy."""
     targets_aligned: torch.Tensor = align_target_mask(logits, targets)
 
     probs: torch.Tensor = torch.sigmoid(logits)
@@ -239,6 +239,7 @@ def main() -> None:
         default=float(cfg_train.get("bce_weight", 0.5)),
         help="BCE weight in combined BCEDiceLoss.",
     )
+
     args = parser.parse_args()
 
     weights_path = Path(cast(str, args.weights))

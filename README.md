@@ -7,6 +7,7 @@ An end-to-end computer vision and systems engineering pipeline combining **PyTor
 ## Table of Contents
 
 - [Overview](#overview)
+  - [Visual Highlights: EDA & Model Results](#visual-highlights-eda--model-results)
 - [Pipeline Architecture](#pipeline-architecture)
 - [Project Structure](#project-structure)
 - [Dataset Guide](#dataset-guide)
@@ -38,7 +39,7 @@ Accurate identification and boundary localization of hematological cells (erythr
 
 The model architecture is primarily based on the foundational 2015 U-Net paper by Ronneberger et al. ([U-Net: Convolutional Networks for Biomedical Image Segmentation](https://arxiv.org/abs/1505.04597)), supporting both **`valid` (unpadded)** convolutions—which eliminate border zero-padding artifacts and require center-cropping along skip connections—and **`same` (one-padded)** convolutions—which preserve exact spatial dimensions ($H \times W$) throughout the contracting and expanding paths. Do note that since `same` padded convolutions have a larger output size (dimensionality), there is more complexity to train and evaluate the model.
 
-## References
+### Key References
 
 - Ronneberger, O., Fischer, P., & Brox, T. (2015). [U-Net: Convolutional Networks for Biomedical Image Segmentation](https://arxiv.org/abs/1505.04597). In _Medical Image Computing and Computer-Assisted Intervention – MICCAI 2015_ (pp. 234–241). Springer. (`arXiv:1505.04597`)
 
@@ -58,6 +59,23 @@ This repository bridges research experimentation and production deployment:
   - **Sub-Pixel Contour Extraction**: Computes vector cell membrane boundaries via `cv::findContours` and renders anti-aliased diagnostic overlays via `cv::drawContours`.
 - **Reproducible Documentation & Presentations (`notebook/`)**:
   - Quarto (`.qmd`) technical notebooks covering exploratory data analysis, architecture derivations, training loss landscapes, C++ inference validation, and a full 11-slide Reveal.js technical interview presentation.
+
+### Visual Highlights: EDA & Model Results
+
+#### Exploratory Data Analysis (EDA) & Mask Inspection
+Inspection of the Blood Cell Segmentation Dataset (BCCD) verifying high-resolution microscopic blood smears, corresponding ground-truth binary masks, and alpha-blended overlays to validate spatial registration and quantify foreground cell distribution prior to training:
+
+![Exploratory Data Analysis: Blood Smear Image, Ground Truth Mask, and Alignment Overlay](assets/eda_dataset_samples.png)
+
+#### PyTorch Model Evaluation & Boundary Contour Verification
+Qualitative evaluation on the held-out test split ($159$ images) with the trained U-Net checkpoint (`best_model.pth`, Test Dice: **$0.9655$**, IoU: **$0.9344$**). The fourth column compares ground-truth boundaries (**green**) with U-Net predicted boundaries (**red dashed**), demonstrating sub-pixel membrane localization and clean separation of clustered blood cells:
+
+![Model Test Evaluation: Blood Smear, Ground Truth Mask, U-Net Prediction, and Sub-Pixel Boundary Contours](assets/evaluation_contour_verification.png)
+
+#### Production C++ ONNX Runtime Engine & OpenCV Contour Overlays
+End-to-end verification of the standalone C++17 inference engine (`inference_app`) executing on unseen blood smears ($228\times 228$ receptive field). Demonstrates numerical parity with PyTorch ($\max \Delta \le 2.42 \times 10^{-6}$), zero-copy SIMD logit thresholding ($z > 0.0\text{f}$), and vector contour extraction via OpenCV at **$28.57\text{ FPS}$**:
+
+![C++ ONNX Runtime Inference Verification: Input Smear, Ground Truth Mask, C++ ONNX Binary Mask, and OpenCV Membrane Contour Overlay](assets/cpp_inference_comparison.png)
 
 ---
 
@@ -108,6 +126,10 @@ All scripts, C++ modules, notebooks, and configurations follow standard, consist
 
 ```
 .
+├── assets/                          # Visual documentation, EDA samples & inference results
+│   ├── cpp_inference_comparison.png # 4-column C++ ONNX Runtime vs. OpenCV overlay grid
+│   ├── eda_dataset_samples.png      # 3-column EDA verification (Image, Mask, Overlay)
+│   └── evaluation_contour_verification.png # 4-column test evaluation with sub-pixel contours
 ├── config/                          # YAML configuration files (hyperparameters, paths)
 │   └── default.yaml                 # Centralized training, export & runtime hyperparameters
 ├── data/
